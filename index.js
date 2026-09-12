@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.0 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.1 · MIT · source modules are included in source-code.zip
 
 // src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.0";
+var VERSION = "0.3.1";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -999,9 +999,30 @@ var SceneUI = class {
     const editor = document.createElement("div");
     editor.className = "sbl-editor";
     editor.innerHTML = '<p>Изменяй HTML/CSS готового блока. В свободном режиме не удаляй <code>data-sbl-slot</code> у картинок.</p><textarea rows="14" spellcheck="false"></textarea><div class="sbl-row"><button type="button" data-action="save-block">Сохранить изменения</button><button type="button" data-action="cancel-block">Отмена</button></div>';
-    editor.querySelector("textarea").value = state.plan.rawHtml || state.plan.artifactHtml || "";
+    editor.querySelector("textarea").value = state.plan.rawHtml || this.reconstructRaw(state.plan);
     root.querySelector(".sbl-content").before(editor);
     editor.querySelector("textarea").focus();
+  }
+  reconstructRaw(plan) {
+    const wrap = document.createElement("div");
+    const tag = plan.layout === "template" ? "scene" : "comics";
+    const root = document.createElement(tag);
+    wrap.append(root);
+    for (let i = 0; i < (plan.slots || []).length; i++) {
+      const image = document.createElement("img");
+      image.dataset.iigInstruction = JSON.stringify(plan.slots[i].instruction || {});
+      image.dataset.sblSlot = String(i);
+      image.alt = `Картинка ${i + 1}`;
+      root.append(image);
+      if (plan.layout === "strict" && i === 0) {
+        const artifact = document.createElement("artifact");
+        artifact.innerHTML = plan.artifactHtml || "";
+        root.append(artifact);
+      }
+    }
+    if (plan.layout === "template") root.insertAdjacentHTML("beforeend", plan.artifactHtml || "");
+    else if (!(plan.slots || []).length) root.insertAdjacentHTML("beforeend", plan.artifactHtml || "");
+    return root.outerHTML;
   }
   closeBlockEditor(root) {
     root.querySelector(".sbl-editor")?.remove();
