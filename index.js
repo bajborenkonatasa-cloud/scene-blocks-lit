@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.1.0 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.2.0 · MIT · source modules are included in source-code.zip
 
 // src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.1.0";
+var VERSION = "0.2.0";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -29,12 +29,15 @@ var DEFAULTS = Object.freeze({
   reasoning: "medium",
   pauseOffscreen: true,
   sillyImagesFolder: "sillyimages",
-  importedName: ""
+  importedName: "",
+  outputMode: "strict",
+  maxImages: 8,
+  presetName: "Комикс + HTML/CSS + картинка"
 });
 var numberIn = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback;
-function normalizeSettings(raw = {}) {
+function normalizeFields(raw = {}) {
   const result = { ...DEFAULTS };
-  for (const key of ["profileId", "prompt", "template", "extraContext", "sillyImagesFolder", "importedName"]) {
+  for (const key of ["profileId", "prompt", "template", "extraContext", "sillyImagesFolder", "importedName", "presetName"]) {
     if (typeof raw[key] === "string") result[key] = raw[key];
   }
   for (const key of ["auto", "pauseOffscreen"]) {
@@ -45,7 +48,67 @@ function normalizeSettings(raw = {}) {
   result.temperature = numberIn(raw.temperature, 0.8, 0, 2);
   result.topP = numberIn(raw.topP, 0.9, 0, 1);
   result.reasoning = ["auto", "min", "low", "medium", "high", "max"].includes(raw.reasoning) ? raw.reasoning : "medium";
+  result.outputMode = raw.outputMode === "template" ? "template" : "strict";
+  result.maxImages = Math.round(numberIn(raw.maxImages, 8, 1, 20));
   return result;
+}
+var PRESET_FIELDS = ["profileId", "prompt", "template", "extraContext", "contextCount", "maxTokens", "temperature", "topP", "reasoning", "importedName", "outputMode", "maxImages"];
+function snapshot(raw) {
+  const settings = normalizeFields(raw);
+  return Object.fromEntries(PRESET_FIELDS.map((key) => [key, settings[key]]));
+}
+function normalizeSettings(raw = {}) {
+  const settings = normalizeFields(raw);
+  const ids = /* @__PURE__ */ new Set();
+  settings.presets = (Array.isArray(raw.presets) ? raw.presets : []).filter((preset) => {
+    if (!preset || typeof preset.id !== "string" || !preset.id || ids.has(preset.id) || !preset.settings) return false;
+    ids.add(preset.id);
+    return true;
+  }).slice(0, 100).map((preset) => ({ id: preset.id, name: String(preset.name || "Мой промпт").slice(0, 100), settings: snapshot(preset.settings) }));
+  if (!settings.presets.length) settings.presets.push({ id: "initial", name: raw.presetName || raw.importedName || DEFAULTS.presetName, settings: snapshot(settings) });
+  settings.activePresetId = settings.presets.some((preset) => preset.id === raw.activePresetId) ? raw.activePresetId : settings.presets[0].id;
+  if (!raw.presetName) settings.presetName = settings.presets.find((preset) => preset.id === settings.activePresetId).name;
+  return settings;
+}
+function savePreset(raw, { asNew = false } = {}) {
+  const settings = normalizeSettings(raw);
+  const preset = !asNew && settings.presets.find((item) => item.id === settings.activePresetId);
+  const name = settings.presetName.trim().slice(0, 100) || "Мой промпт";
+  if (preset) {
+    preset.name = name;
+    preset.settings = snapshot(settings);
+  } else {
+    if (settings.presets.length >= 100) throw new Error("Сохранено уже 100 промптов. Удали ненужный перед добавлением.");
+    const item = { id: crypto.randomUUID(), name, settings: snapshot(settings) };
+    settings.presets.push(item);
+    settings.activePresetId = item.id;
+  }
+  settings.presetName = name;
+  return settings;
+}
+function selectPreset(raw, id) {
+  const settings = normalizeSettings(raw);
+  const preset = settings.presets.find((item) => item.id === id);
+  if (!preset) throw new Error("Этот промпт не найден. Обнови список.");
+  return normalizeSettings({ ...settings, ...preset.settings, activePresetId: preset.id, presetName: preset.name });
+}
+function deletePreset(raw) {
+  const settings = normalizeSettings(raw);
+  if (settings.presets.length <= 1) throw new Error("Оставь хотя бы один промпт. Его содержимое можно заменить.");
+  settings.presets = settings.presets.filter((item) => item.id !== settings.activePresetId);
+  return selectPreset(settings, settings.presets[0].id);
+}
+function newPreset(raw) {
+  const settings = savePreset(raw);
+  return savePreset({ ...settings, auto: false, presetName: "Новый промпт", prompt: "", template: "", extraContext: "", importedName: "", outputMode: "template" }, { asNew: true });
+}
+function rememberPreset(raw, candidate) {
+  const current = normalizeSettings(raw);
+  const name = (candidate.presetName || candidate.importedName || "Импортированный промпт").trim().slice(0, 100);
+  const data = snapshot(candidate);
+  const same = current.presets.find((preset) => preset.name === name && JSON.stringify(preset.settings) === JSON.stringify(data));
+  if (same) return selectPreset({ ...current, auto: false }, same.id);
+  return savePreset({ ...current, ...data, presetName: name, auto: false }, { asNew: true });
 }
 function getSettings(context) {
   const settings = normalizeSettings(context.extensionSettings[KEY]);
@@ -56,6 +119,9 @@ function importBlock(raw, current, context) {
   if (raw?.kind === KEY && raw.settings) return normalizeSettings({ ...raw.settings, auto: false });
   if (!raw || raw.block_type !== "generated" || typeof raw.prompt !== "string" || typeof raw.template !== "string") {
     throw new Error("Нужен JSON одного G-блока ExtBlocks или экспорт «Моих сцен».");
+  }
+  if ((raw.context || []).some((item) => !item.disabled && !["last_messages", "text", "previous_block"].includes(item.type))) {
+    throw new Error("Этот G-блок использует дополнительный источник контекста. В этой версии переносятся текст и последние сообщения.");
   }
   if ((raw.context || []).some((item) => !item.disabled && item.type === "previous_block" && item.block_name)) {
     throw new Error("Этот блок зависит от другого блока. Сначала убери эту зависимость в копии блока.");
@@ -73,6 +139,9 @@ function importBlock(raw, current, context) {
     extraContext: extra,
     contextCount: last?.messages_count ?? current.contextCount,
     importedName: raw.name || "",
+    presetName: raw.name || "Импортированный промпт",
+    outputMode: "template",
+    maxImages: DEFAULTS.maxImages,
     profileId: matches.length === 1 ? matches[0].id : current.profileId,
     maxTokens: preset?.max_tokens ?? current.maxTokens,
     temperature: preset?.temperature ?? current.temperature,
@@ -83,6 +152,7 @@ function importBlock(raw, current, context) {
 function conflictingBlock(context, settings) {
   const ext = context.extensionSettings.ExtBlocks;
   if (!ext?.extblocks_is_enabled) return "";
+  if ((context.extensionSettings.disabledExtensions || []).some((name) => /(?:^|\/)ext-blocks(?:-custom)?$/i.test(name))) return "";
   const set = ext.sets?.[ext.active_set_idx] || ext.sets?.find((item) => item.name === ext.active_set);
   const scoped = context.characters?.[context.characterId]?.data?.extensions?.ExtBlocks || [];
   const local = Array.isArray(scoped) ? scoped : [];
@@ -111,7 +181,7 @@ var chatKey = (context) => JSON.stringify([context.getCurrentChatId?.() ?? conte
 function readState(message) {
   if (!message) return null;
   const source = fingerprint(message.mes || "");
-  return [message.extra?.[KEY], message.swipe_info?.[swipeId(message)]?.extra?.[KEY]].find((state) => state?.version === 1 && state.source === source) || null;
+  return [message.extra?.[KEY], message.swipe_info?.[swipeId(message)]?.extra?.[KEY]].find((state) => [1, 2].includes(state?.version) && state.source === source) || null;
 }
 function writeState(message, state) {
   message.extra ??= {};
@@ -198,7 +268,8 @@ var SceneEngine = class {
     const existing = readState(token.message);
     if (automatic && existing) return Promise.resolve();
     if (this.jobs.size >= 4) return Promise.reject(new SceneError("queue", "В очереди уже четыре сцены. Дождись завершения."));
-    const job = { token, settings: structuredClone(settings), mode, controller: new AbortController(), label: "В очереди", state: existing ? structuredClone(existing) : null };
+    const { presets, ...selectedSettings } = settings;
+    const job = { token, settings: structuredClone(selectedSettings), mode, controller: new AbortController(), label: "В очереди", state: existing ? structuredClone(existing) : null };
     const key = crypto.randomUUID();
     this.jobs.set(key, job);
     const task = this.tail.catch(() => {
@@ -227,35 +298,37 @@ var SceneEngine = class {
     try {
       this.check(job);
       if (!job.state?.plan || job.mode === "rebuild") {
-        this.status(job, "Готовлю комикс, HTML/CSS и иллюстрацию…");
+        this.status(job, job.settings.outputMode === "template" ? "Готовлю блок по выбранному промпту…" : "Готовлю комикс, HTML/CSS и иллюстрацию…");
         const plan = await this.prepare(job.settings, job.token, job.controller.signal);
         this.check(job);
-        if (!plan?.artifactHtml?.trim() || plan.slots?.length !== 2) throw new SceneError("format", "В ответе нужны комикс, HTML/CSS и отдельная картинка.");
+        if (!plan?.artifactHtml?.trim() || !Array.isArray(plan.slots) || plan.slots.length > 20 || plan.layout !== "template" && plan.slots.length !== 2) throw new SceneError("format", "Не удалось разобрать структуру блока. Проверь промпт и выбранный формат.");
         job.state = {
-          version: 1,
+          version: 2,
           id: crypto.randomUUID(),
           source: fingerprint(job.token.text),
           createdAt: Date.now(),
           status: "images",
           error: null,
-          plan: { artifactHtml: plan.artifactHtml, slots: plan.slots.map((slot) => ({ instruction: slot.instruction, src: "", status: "pending", error: null })) }
+          plan: { layout: plan.layout || "strict", artifactHtml: plan.artifactHtml, slots: plan.slots.map((slot) => ({ instruction: slot.instruction, src: "", status: "pending", error: null })) }
         };
         await this.commit(job);
       } else {
         job.state.error = null;
-        if (job.mode === "comic" || job.mode === "image") {
-          const slot = job.state.plan.slots[job.mode === "comic" ? 0 : 1];
+        if (job.mode === "comic" || job.mode === "image" || /^slot-\d+$/.test(job.mode)) {
+          const selected = job.mode === "comic" ? 0 : job.mode === "image" ? 1 : Number(job.mode.slice(5));
+          const slot = job.state.plan.slots[selected];
+          if (!slot) throw new SceneError("image_selection", "Этой картинки нет в сохранённом блоке.");
           slot.status = "pending";
           slot.error = null;
         }
       }
-      for (let index = 0; index < 2; index++) {
+      for (let index = 0; index < job.state.plan.slots.length; index++) {
         this.check(job);
         const slot = job.state.plan.slots[index];
         if (slot.status === "ready" && slot.src) continue;
         const cacheKey = `${job.state.id}:${index}`;
         try {
-          this.status(job, index === 0 ? "Рисую комикс · 1/2" : "Рисую отдельную картинку · 2/2");
+          this.status(job, job.state.plan.layout === "template" ? `Рисую картинку · ${index + 1}/${job.state.plan.slots.length}` : index === 0 ? "Рисую комикс · 1/2" : "Рисую отдельную картинку · 2/2");
           let generated = this.pendingMedia.get(cacheKey);
           if (!generated) {
             generated = await this.generateImage(slot.instruction, job.settings, job.token, job.controller.signal);
@@ -263,7 +336,7 @@ var SceneEngine = class {
             this.pendingMedia.set(cacheKey, generated);
             while (this.pendingMedia.size > 2) this.pendingMedia.delete(this.pendingMedia.keys().next().value);
           }
-          this.status(job, index === 0 ? "Сохраняю комикс…" : "Сохраняю отдельную картинку…");
+          this.status(job, `Сохраняю картинку ${index + 1}…`);
           const src = await this.persistImage(generated, job.settings, job.token, job.controller.signal);
           this.check(job);
           slot.src = src;
@@ -290,7 +363,7 @@ var SceneEngine = class {
     } catch (error) {
       if (!isLive(job.token, this.getContext(), this.epoch)) return;
       const detail = publicError(error);
-      job.state ??= { version: 1, id: crypto.randomUUID(), source: fingerprint(job.token.text), createdAt: Date.now(), plan: null };
+      job.state ??= { version: 2, id: crypto.randomUUID(), source: fingerprint(job.token.text), createdAt: Date.now(), plan: null };
       job.state.status = detail.code === "stopped" ? "paused" : "error";
       job.state.error = detail;
       writeState(job.token.message, job.state);
@@ -300,6 +373,7 @@ var SceneEngine = class {
         try {
           await this.getContext().saveChat();
         } catch {
+          if (!isLive(job.token, this.getContext(), this.epoch)) return;
           job.state.error = publicError(new SceneError("save", "Не удалось сохранить чат. Нажми «Продолжить»."));
           writeState(job.token.message, job.state);
         }
@@ -331,12 +405,35 @@ function instructionFrom(element) {
   }
   return instruction;
 }
-function parsePlan(html) {
+function parsePlan(html, settings = {}) {
   if (typeof html !== "string" || html.length > 2e5) throw new SceneError("format", "Генератор вернул слишком большой или пустой ответ.");
   const cleaned = html.trim().replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/, "").replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
   const template = document.createElement("template");
   template.innerHTML = cleaned;
   const images = [...template.content.querySelectorAll("img[data-iig-instruction]")];
+  if (settings.outputMode === "template") {
+    const maxImages = settings.maxImages || 8;
+    if (images.length > maxImages) throw new SceneError("format", `Модель запросила ${images.length} картинок. Лимит этого промпта — ${maxImages}. Проверь ответ или увеличь лимит.`);
+    const slots2 = images.map((image) => ({ instruction: instructionFrom(image) }));
+    template.content.querySelectorAll("[data-sbl-slot]").forEach((element) => element.removeAttribute("data-sbl-slot"));
+    images.forEach((image, index) => {
+      for (const attribute of ["data-iig-instruction", "src", "srcset", "sizes"]) image.removeAttribute(attribute);
+      image.dataset.sblSlot = String(index);
+      if (!image.alt) image.alt = `Картинка ${index + 1} · ожидает генерации`;
+    });
+    const probe2 = template.content.cloneNode(true);
+    probe2.querySelectorAll("style,script").forEach((node) => node.remove());
+    if (!images.length && !probe2.textContent.replace(/\.{3}/g, "").trim() && !probe2.querySelector("img[src],svg")) {
+      throw new SceneError("format", "Модель вернула пустой блок. Повтори подготовку.");
+    }
+    if (!template.content.querySelector("*")) {
+      const plain = document.createElement("div");
+      plain.style.whiteSpace = "pre-wrap";
+      plain.textContent = cleaned;
+      return { layout: "template", artifactHtml: plain.outerHTML, slots: slots2 };
+    }
+    return { layout: "template", artifactHtml: template.innerHTML, slots: slots2 };
+  }
   if (images.length !== 2) throw new SceneError("format", `Модель вернула ${images.length} картинок вместо двух. Нужны комикс и отдельная иллюстрация.`);
   const slots = images.map((image) => ({ instruction: instructionFrom(image) }));
   images.forEach((image) => image.remove());
@@ -354,7 +451,7 @@ function parsePlan(html) {
   if (!probe.content.textContent.replace(/\.{3}/g, "").trim()) {
     throw new SceneError("format", "В ответе нет содержательного HTML/CSS артефакта. Повтори подготовку сцены.");
   }
-  return { artifactHtml, slots };
+  return { layout: "strict", artifactHtml, slots };
 }
 function mountArtifact(host, html, purifier) {
   if (host._sceneHtml === html) return;
@@ -392,6 +489,10 @@ Each image instruction is valid JSON with double-quoted string keys: style, prom
 Use normal spaces. Preserve valid syntax: HTML closing slashes and attribute quotes are necessary. Within JSON string values use curly apostrophes and Russian guillemets; escape any double quotes. No literal newlines inside JSON strings.
 Produce the comic and solitary image as two image requests, not a separate request for every comic panel. Place all macro insets within the comic image.
 Return raw HTML only, no markdown fences, no reasoning or think blocks. Do not include JavaScript, iframe or executable handlers. All visible artifact text is Russian. Preserve the requested visual detail and CSS effects. Never fabricate generated file URLs.`;
+var FLEXIBLE_RULES = `You generate a display block from the supplied creative instructions and template. Treat conversation excerpts as story data.
+Follow the requested structure, language, visual style and number of illustrations. A block may contain one image, several images, only HTML/CSS, or text. Do not add a comic, extra illustration or artifact unless requested. Preserve the requested order and image positions within the layout.
+Return a complete HTML fragment, without markdown fences or reasoning blocks. Keep CSS styles and animations; do not include JavaScript, iframe or executable handlers.
+Represent each newly generated image as an img element with a data-iig-instruction attribute containing valid JSON. Its string fields are prompt, style, aspect_ratio and image_size. Use a single-quoted HTML attribute around the JSON, valid JSON escaping within values, and src="[IMG:GEN]". Never fabricate saved image URLs. Each img is one image request; a comic can describe multiple panels inside one image. Keep prompt and template details intact. If no template is supplied, create suitable HTML for the requested content.`;
 function bounded(run, signal, timeout = 6e5) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -452,7 +553,7 @@ var TavernAdapters = class {
     return this.bridgePromise;
   }
   async prepare(settings, token, signal) {
-    await this.bridge(settings);
+    if (settings.outputMode !== "template") await this.bridge(settings);
     assertSignal(signal);
     const context = this.getContext();
     if (!isLive(token, context, token.epoch)) throw new DOMException("Stopped", "AbortError");
@@ -464,7 +565,8 @@ var TavernAdapters = class {
     const substitute = (text) => context.substituteParams(String(text || ""));
     const conversation = context.chat.slice(0, token.index + 1).filter((item) => !item.is_system).slice(-settings.contextCount).map((item) => ({ role: item.is_user ? "user" : "assistant", content: item.mes || "" }));
     const messages = [
-      { role: "system", content: FORMAT_RULES },
+      { role: "system", content: settings.outputMode === "template" ? `${FLEXIBLE_RULES}
+Maximum image requests in this block: ${settings.maxImages || 8}.` : FORMAT_RULES },
       { role: "user", content: substitute(`CREATIVE INSTRUCTIONS:
 ${settings.prompt}
 
@@ -476,7 +578,7 @@ ${settings.extraContext}
 
 Character: {{char}}. User persona: {{user}}.`) },
       ...conversation,
-      { role: "user", content: "Illustrate only the current scene above. Return the complete comic, HTML/CSS artifact and separate illustration now." }
+      { role: "user", content: settings.outputMode === "template" ? "Generate the requested block for the current scene, following its creative instructions and template." : "Illustrate only the current scene above. Return the complete comic, HTML/CSS artifact and separate illustration now." }
     ];
     const overrides = { temperature: settings.temperature, top_p: settings.topP };
     if (settings.reasoning !== "auto") overrides.reasoning_effort = settings.reasoning;
@@ -494,7 +596,7 @@ Character: {{char}}. User persona: {{user}}.`) },
     ), signal, 18e4);
     assertSignal(signal);
     const content = typeof result === "string" ? result : result?.content;
-    return parsePlan(content);
+    return parsePlan(content, settings);
   }
   async generateImage(instruction, settings, token, signal) {
     const bridge = await this.bridge(settings);
@@ -593,18 +695,22 @@ var SceneUI = class {
     section.id = "sbl-settings";
     section.innerHTML = `<summary>Мои сцены <small>· ${VERSION}</small></summary>
           <div class="sbl-settings-body">
-            <p class="sbl-muted">Комикс → HTML/CSS → отдельная картинка</p>
+            <p class="sbl-muted">Картинки и HTML/CSS по выбранному промпту</p>
+            <label>Мои сохранённые промпты<select id="sbl-presetChoice"></select></label>
+            <label>Название промпта<input id="sbl-presetName" type="text" maxlength="100"></label>
+            <div class="sbl-row"><button type="button" id="sbl-new-preset">Новый промпт</button><button type="button" id="sbl-delete-preset">Удалить выбранный</button></div>
+            <label>Формат результата<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → отдельная картинка</option></select></label>
             <label class="sbl-check"><input id="sbl-auto" type="checkbox"> Автоматически после нового ответа</label>
             <label>Подключение для подготовки сцены<select id="sbl-profile"></select></label>
             <button type="button" id="sbl-refresh">Обновить списки</button>
             <label>Промпт из активного набора ExtBlocks<select id="sbl-ext-block"></select></label>
-            <button type="button" id="sbl-from-ext">Перенести из ExtBlocks</button>
+            <div class="sbl-row"><button type="button" id="sbl-from-ext">Перенести из ExtBlocks</button><button type="button" id="sbl-all-ext">Сохранить весь набор G-блоков</button></div>
             <p id="sbl-current-prompt" class="sbl-muted"></p>
             <div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока</button><button type="button" id="sbl-export">Экспорт настроек</button></div>
             <input id="sbl-file" type="file" accept="application/json,.json" hidden>
             <details><summary>Промпт и шаблон</summary>
               <label>Творческая инструкция<textarea id="sbl-prompt" rows="10"></textarea></label>
-              <label>HTML-шаблон<textarea id="sbl-template" rows="7"></textarea></label>
+              <label>HTML-шаблон (в свободном режиме можно оставить пустым)<textarea id="sbl-template" rows="7"></textarea></label>
               <label>Дополнительный контекст<textarea id="sbl-extraContext" rows="4"></textarea></label>
             </details>
             <details><summary>Дополнительные настройки</summary>
@@ -612,6 +718,7 @@ var SceneUI = class {
               <label>Лимит токенов<input id="sbl-maxTokens" type="number" min="512" max="32000"></label>
               <label>Температура<input id="sbl-temperature" type="number" min="0" max="2" step="0.1"></label>
               <label>Top P<input id="sbl-topP" type="number" min="0" max="1" step="0.05"></label></div>
+              <label>Максимум картинок в свободном блоке<input id="sbl-maxImages" type="number" min="1" max="20"></label>
               <label>Уровень рассуждения<select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальный</option><option value="low">Низкий</option><option value="medium">Средний</option><option value="high">Высокий</option><option value="max">Максимальный</option></select></label>
               <label>Папка установленного SillyImages<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label>
               <label class="sbl-check"><input id="sbl-pauseOffscreen" type="checkbox"> Приостанавливать анимации за экраном</label>
@@ -624,6 +731,37 @@ var SceneUI = class {
     parent.append(section);
     this.fillSettings();
     const on2 = (id, event, handler) => section.querySelector(`#${id}`).addEventListener(event, handler);
+    on2("sbl-presetChoice", "change", (event) => {
+      try {
+        const id = event.target.value;
+        this.readInputs();
+        this.store(selectPreset(this.settings(), id));
+        this.fillSettings();
+        this.notice("Промпт выбран для следующих сцен. Для уже готового ответа нажми «Обновить всё».");
+      } catch (error) {
+        this.notice(error.message, true);
+      }
+    });
+    on2("sbl-new-preset", "click", () => {
+      try {
+        this.readInputs();
+        this.store(newPreset(this.settings()));
+        this.fillSettings();
+        section.querySelector("#sbl-prompt").closest("details").open = true;
+        this.notice("Введи название и свой промпт, затем нажми «Сохранить».");
+      } catch (error) {
+        this.notice(error.message, true);
+      }
+    });
+    on2("sbl-delete-preset", "click", () => {
+      try {
+        this.store(deletePreset(this.settings()));
+        this.fillSettings();
+        this.notice("Выбранный промпт удалён из нового расширения.");
+      } catch (error) {
+        this.notice(error.message, true);
+      }
+    });
     on2("sbl-save", "click", () => {
       this.readInputs();
       this.notice("Настройки сохранены.");
@@ -662,6 +800,25 @@ var SceneUI = class {
         this.notice(error.message, true);
       }
     });
+    on2("sbl-all-ext", "click", () => {
+      this.readInputs();
+      this.fillExtBlocks();
+      let settings = this.settings(), count = 0, skipped = 0;
+      const previous = settings.activePresetId;
+      for (const block of this.extCandidates) {
+        try {
+          settings = rememberPreset(settings, importBlock(block, settings, this.getContext()));
+          count++;
+        } catch {
+          skipped++;
+        }
+      }
+      settings = selectPreset(settings, previous);
+      settings.auto = false;
+      this.store(settings);
+      this.fillSettings();
+      this.notice(`Перенесено G-блоков: ${count}. Пропущено: ${skipped}. ${skipped ? "Блоки с зависимостями нужно проверить отдельно." : "Выбери нужный в «Моих сохранённых промптах». Старый набор сохранён."}`, Boolean(skipped));
+    });
     on2("sbl-export", "click", () => {
       this.readInputs();
       this.download("Scene-Blocks-settings.json", { kind: KEY, version: VERSION, settings: this.settings() });
@@ -669,9 +826,23 @@ var SceneUI = class {
     on2("sbl-debug", "click", () => this.download("Scene-Blocks-debug.json", this.diagnostics()));
   }
   acceptImport(raw) {
-    this.store(importBlock(raw, this.settings(), this.getContext()));
+    this.readInputs();
+    let settings = this.settings();
+    const imported = importBlock(raw, settings, this.getContext());
+    if (raw?.kind === KEY) {
+      let active;
+      for (const preset of imported.presets) {
+        settings = rememberPreset(settings, { ...preset.settings, presetName: preset.name });
+        if (preset.id === imported.activePresetId) active = settings.activePresetId;
+      }
+      if (active) settings = selectPreset(settings, active);
+      settings.sillyImagesFolder = imported.sillyImagesFolder;
+      settings.pauseOffscreen = imported.pauseOffscreen;
+    } else settings = rememberPreset(settings, imported);
+    settings.auto = false;
+    this.store(settings);
     this.fillSettings();
-    this.notice("Промпт и шаблон перенесены. Проверь подключение и выключи старый G-блок перед запуском.");
+    this.notice("Промпт сохранён в новом расширении. Проверь формат, подключение и выключи старый G-блок перед запуском.");
   }
   download(name, value) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
@@ -715,7 +886,14 @@ var SceneUI = class {
     }
     this.fillProfiles();
     this.fillExtBlocks();
-    document.getElementById("sbl-current-prompt").textContent = `Текущий промпт: ${settings.importedName || "встроенный пример"}. За один запуск используется только он.`;
+    this.fillSavedPresets();
+    document.getElementById("sbl-current-prompt").textContent = `Текущий промпт: ${settings.presetName}. За один запуск используется только он.`;
+  }
+  fillSavedPresets() {
+    const settings = this.settings(), select = document.getElementById("sbl-presetChoice");
+    select.replaceChildren(...settings.presets.map((preset) => new Option(`${preset.name} · ${preset.settings.outputMode === "strict" ? "комикс + HTML + картинка" : "по промпту"}`, preset.id)));
+    select.value = settings.activePresetId;
+    document.getElementById("sbl-delete-preset").disabled = settings.presets.length <= 1;
   }
   readInputs() {
     const settings = this.settings();
@@ -723,7 +901,8 @@ var SceneUI = class {
       const field = document.getElementById(`sbl-${key === "profileId" ? "profile" : key}`);
       if (field) settings[key] = field.type === "checkbox" ? field.checked : field.value;
     }
-    this.store(settings);
+    this.store(savePreset(settings));
+    this.fillSavedPresets();
     if (!settings.pauseOffscreen) document.querySelectorAll(".sbl-artifact[data-paused]").forEach((host) => host.removeAttribute("data-paused"));
   }
   renderAll() {
@@ -767,6 +946,7 @@ var SceneUI = class {
         if (!button) return;
         const liveIndex = Number(mes.getAttribute("mesid"));
         if (button.dataset.action === "stop") this.engine.stop(liveIndex);
+        else if (button.dataset.action === "retry-selected") void this.start(liveIndex, `slot-${root.querySelector(".sbl-select-image").value}`);
         else void this.start(liveIndex, button.dataset.action);
       });
       const body = mes.querySelector(".mes_text");
@@ -781,6 +961,10 @@ var SceneUI = class {
     root.querySelector(".sbl-message").textContent = state?.error?.message || "";
     const content = root.querySelector(".sbl-content");
     if (!state?.plan) return;
+    if (state.plan.layout === "template") {
+      this.renderTemplate(content, state, job, index);
+      return;
+    }
     if (content.dataset.plan !== state.id) {
       const oldHost = content.querySelector(".sbl-artifact");
       if (oldHost) this.visibility?.unobserve(oldHost);
@@ -805,6 +989,43 @@ var SceneUI = class {
       figure.querySelector(".sbl-slot-status").textContent = slot.error?.message || (slot.status === "ready" ? "" : "Ожидает завершения");
       figure.querySelector("button").hidden = Boolean(job);
     });
+  }
+  renderTemplate(content, state, job, index) {
+    if (content.dataset.plan !== state.id) {
+      const oldHost = content.querySelector(".sbl-artifact");
+      if (oldHost) this.visibility?.unobserve(oldHost);
+      content.dataset.plan = state.id;
+      content.innerHTML = '<div class="sbl-artifact-clip"><div class="sbl-artifact"></div></div><div class="sbl-image-tools"><label>Картинка <select class="sbl-select-image"></select></label><button type="button" data-action="retry-selected">Повторить выбранную</button><a class="sbl-open-image" target="_blank" rel="noopener noreferrer">Открыть картинку</a><p class="sbl-selection-status" role="status"></p></div>';
+      const select2 = content.querySelector(".sbl-select-image");
+      state.plan.slots.forEach((_, slotIndex) => select2.append(new Option(String(slotIndex + 1), String(slotIndex))));
+      select2.addEventListener("change", () => {
+        const mes = content.closest(".mes");
+        this.renderMessage(mes ? Number(mes.getAttribute("mesid")) : index);
+      });
+    }
+    const host = content.querySelector(".sbl-artifact");
+    try {
+      mountArtifact(host, state.plan.artifactHtml, this.purifier);
+    } catch {
+      host.textContent = "Не удалось отобразить HTML/CSS блока.";
+    }
+    this.visibility?.observe(host);
+    const tools = content.querySelector(".sbl-image-tools"), select = tools.querySelector("select");
+    tools.hidden = !state.plan.slots.length;
+    state.plan.slots.forEach((slot, slotIndex) => {
+      const image = host.shadowRoot?.querySelector(`img[data-sbl-slot="${slotIndex}"]`);
+      if (image && typeof slot.src === "string" && /^\/(?!\/)/.test(slot.src) && image.getAttribute("src") !== slot.src) image.src = slot.src;
+      if (image) image.setAttribute("aria-busy", String(slot.status !== "ready"));
+      const label = slot.status === "ready" ? "готова" : slot.error ? "ошибка" : "ожидает";
+      if (select.options[slotIndex]) select.options[slotIndex].textContent = `${slotIndex + 1} · ${label}`;
+    });
+    const selected = state.plan.slots[Number(select.value)], link = tools.querySelector(".sbl-open-image");
+    const hasFile = typeof selected?.src === "string" && /^\/(?!\/)/.test(selected.src);
+    link.hidden = !hasFile;
+    if (hasFile) link.href = selected.src;
+    else link.removeAttribute("href");
+    tools.querySelector("button").disabled = Boolean(job) || !selected;
+    tools.querySelector(".sbl-selection-status").textContent = selected?.error?.message || "";
   }
 };
 
@@ -846,6 +1067,9 @@ function diagnostics() {
     bridgeLoaded: Boolean(adapters.loadedBridge),
     contextCount: settings.contextCount,
     maxTokens: settings.maxTokens,
+    outputMode: settings.outputMode,
+    savedPrompts: settings.presets.length,
+    maxImages: settings.maxImages,
     queue: engine.jobs.size,
     sceneStates: context.chat.map(readState).filter(Boolean).slice(-10).map((state) => ({
       status: state.status,

@@ -23,4 +23,8 @@
 .sbl-artifact-clip{contain:layout paint;isolation:isolate;overflow:hidden;width:100%;min-width:0;max-width:100%;border-radius:9px}
 .sbl-artifact{display:block;min-width:0;max-width:100%}
 .sbl-open{font:inherit;cursor:pointer}
+.sbl-image-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;font-size:.88em}
+.sbl-image-tools label{display:flex;align-items:center;gap:6px}.sbl-image-tools select{max-width:140px;background:var(--SmartThemeBlurTintColor,#19222b);color:inherit;border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:6px;padding:7px}
+.sbl-selection-status{flex-basis:100%;margin:0}.sbl-selection-status:empty{display:none}.sbl-open-image{color:inherit;text-decoration:underline}
+#sbl-settings button:disabled,.sbl-output button:disabled{opacity:.5;cursor:default}
 @media(max-width:480px){.sbl-output{padding:8px}.sbl-toolbar button{padding:8px;font-size:.9em}.sbl-row>button{flex:1 1 120px}}
