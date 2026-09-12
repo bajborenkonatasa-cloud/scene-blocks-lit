@@ -1,0 +1,11 @@
+{
+  "display_name": "Мои сцены · Scene Blocks Lite",
+  "loading_order": 110,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Personal build",
+  "version": "0.1.0",
+  "auto_update": false
+}

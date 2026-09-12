@@ -1,0 +1,26 @@
+#sbl-settings{border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:12px;margin:12px 0;color:inherit}
+#sbl-settings>summary{padding:12px;font-weight:700;cursor:pointer}
+#sbl-settings small,.sbl-muted{opacity:.7;font-size:.85em}
+.sbl-settings-body{padding:0 12px 12px;display:grid;gap:12px;min-width:0}
+#sbl-settings label{display:grid;gap:6px;font-size:.95em;min-width:0}
+#sbl-settings .sbl-check{display:flex;align-items:center;gap:9px}
+#sbl-settings input:not([type=checkbox]),#sbl-settings select,#sbl-settings textarea{width:100%;max-width:100%;min-width:0;box-sizing:border-box;color:inherit;background:var(--SmartThemeBlurTintColor,#19222b);border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:7px;padding:8px}
+#sbl-settings textarea{resize:vertical;font-family:monospace;line-height:1.4}
+#sbl-settings details{min-width:0}#sbl-settings details>summary{cursor:pointer;padding:8px 0}#sbl-settings details label{margin:8px 0}
+.sbl-row{display:flex;flex-wrap:wrap;gap:8px}.sbl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#sbl-settings button,.sbl-output button{border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:7px;padding:8px 10px;color:inherit;background:var(--SmartThemeBlurTintColor,#19222b);cursor:pointer;line-height:1.3}
+#sbl-settings button:hover,.sbl-output button:hover{filter:brightness(1.2)}
+#sbl-settings .sbl-primary{border-color:#829fe1;background:#263956}
+#sbl-notice{font-size:.9em;margin:0;overflow-wrap:anywhere}.sbl-error{color:#ffb3a8}
+.sbl-output{box-sizing:border-box;max-width:100%;min-width:0;margin:14px 0 6px;padding:10px;border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:12px;overflow:hidden}
+.sbl-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:.85em}.sbl-status{flex:1 1 130px;font-weight:600}
+.sbl-output [hidden],#sbl-settings [hidden]{display:none!important}
+.sbl-content{display:grid;gap:12px;min-width:0}.sbl-content figure{margin:10px 0 0;min-width:0}
+.sbl-content figcaption{font-size:.8em;opacity:.65;margin-bottom:6px}
+.sbl-content figure img{display:block;width:100%;max-width:100%;height:auto;border-radius:9px}
+.sbl-content figure a{display:block}.sbl-slot-status,.sbl-message{font-size:.88em;overflow-wrap:anywhere}
+.sbl-slot-status:empty,.sbl-message:empty{display:none}
+.sbl-artifact-clip{contain:layout paint;isolation:isolate;overflow:hidden;width:100%;min-width:0;max-width:100%;border-radius:9px}
+.sbl-artifact{display:block;min-width:0;max-width:100%}
+.sbl-open{font:inherit;cursor:pointer}
+@media(max-width:480px){.sbl-output{padding:8px}.sbl-toolbar button{padding:8px;font-size:.9em}.sbl-row>button{flex:1 1 120px}}
