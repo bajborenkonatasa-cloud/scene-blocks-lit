@@ -23,6 +23,8 @@
 .sbl-artifact-clip{contain:layout paint;isolation:isolate;overflow:hidden;width:100%;min-width:0;max-width:100%;border-radius:9px}
 .sbl-artifact{display:block;min-width:0;max-width:100%}
 .sbl-open{font:inherit;cursor:pointer}
+.sbl-editor{margin:8px 0;padding:10px;border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:8px;background:rgba(0,0,0,.18)}
+.sbl-editor p{margin:0 0 7px;font-size:.85em}.sbl-editor textarea{display:block;width:100%;min-height:180px;box-sizing:border-box;font:13px/1.35 monospace;background:#10161b;color:inherit;border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:6px;padding:8px;resize:vertical}
 .sbl-image-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;font-size:.88em}
 .sbl-image-tools label{display:flex;align-items:center;gap:6px}.sbl-image-tools select{max-width:140px;background:var(--SmartThemeBlurTintColor,#19222b);color:inherit;border:1px solid var(--SmartThemeBorderColor,#53606c);border-radius:6px;padding:7px}
 .sbl-selection-status{flex-basis:100%;margin:0}.sbl-selection-status:empty{display:none}.sbl-open-image{color:inherit;text-decoration:underline}

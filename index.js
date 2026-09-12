@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.2.0 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.0 · MIT · source modules are included in source-code.zip
 
 // src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.2.0";
+var VERSION = "0.3.0";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -309,7 +309,7 @@ var SceneEngine = class {
           createdAt: Date.now(),
           status: "images",
           error: null,
-          plan: { layout: plan.layout || "strict", artifactHtml: plan.artifactHtml, slots: plan.slots.map((slot) => ({ instruction: slot.instruction, src: "", status: "pending", error: null })) }
+          plan: { layout: plan.layout || "strict", artifactHtml: plan.artifactHtml, rawHtml: plan.rawHtml || "", slots: plan.slots.map((slot) => ({ instruction: slot.instruction, src: "", status: "pending", error: null })) }
         };
         await this.commit(job);
       } else {
@@ -430,9 +430,9 @@ function parsePlan(html, settings = {}) {
       const plain = document.createElement("div");
       plain.style.whiteSpace = "pre-wrap";
       plain.textContent = cleaned;
-      return { layout: "template", artifactHtml: plain.outerHTML, slots: slots2 };
+      return { layout: "template", artifactHtml: plain.outerHTML, slots: slots2, rawHtml: cleaned };
     }
-    return { layout: "template", artifactHtml: template.innerHTML, slots: slots2 };
+    return { layout: "template", artifactHtml: template.innerHTML, slots: slots2, rawHtml: cleaned };
   }
   if (images.length !== 2) throw new SceneError("format", `Модель вернула ${images.length} картинок вместо двух. Нужны комикс и отдельная иллюстрация.`);
   const slots = images.map((image) => ({ instruction: instructionFrom(image) }));
@@ -451,7 +451,7 @@ function parsePlan(html, settings = {}) {
   if (!probe.content.textContent.replace(/\.{3}/g, "").trim()) {
     throw new SceneError("format", "В ответе нет содержательного HTML/CSS артефакта. Повтори подготовку сцены.");
   }
-  return { layout: "strict", artifactHtml, slots };
+  return { layout: "strict", artifactHtml, slots, rawHtml: cleaned };
 }
 function mountArtifact(host, html, purifier) {
   if (host._sceneHtml === html) return;
@@ -940,12 +940,15 @@ var SceneUI = class {
     if (!root) {
       root = document.createElement("section");
       root.className = "sbl-output";
-      root.innerHTML = '<div class="sbl-toolbar"><span class="sbl-status" role="status" aria-live="polite"></span><button type="button" data-action="continue">Продолжить</button><button type="button" data-action="rebuild">Обновить всё</button><button type="button" data-action="stop">Стоп</button></div><div class="sbl-content"></div><p class="sbl-message"></p>';
+      root.innerHTML = '<div class="sbl-toolbar"><span class="sbl-status" role="status" aria-live="polite"></span><button type="button" data-action="continue">Продолжить</button><button type="button" data-action="rebuild">Обновить всё</button><button type="button" data-action="edit-block">Изменить блок</button><button type="button" data-action="stop">Стоп</button></div><div class="sbl-content"></div><p class="sbl-message"></p>';
       root.addEventListener("click", (event) => {
         const button = event.target.closest("button[data-action]");
         if (!button) return;
         const liveIndex = Number(mes.getAttribute("mesid"));
-        if (button.dataset.action === "stop") this.engine.stop(liveIndex);
+        if (button.dataset.action === "edit-block") this.openBlockEditor(root, liveIndex, readState(this.getContext().chat[liveIndex]));
+        else if (button.dataset.action === "save-block") void this.saveBlockEditor(root, liveIndex);
+        else if (button.dataset.action === "cancel-block") this.closeBlockEditor(root);
+        else if (button.dataset.action === "stop") this.engine.stop(liveIndex);
         else if (button.dataset.action === "retry-selected") void this.start(liveIndex, `slot-${root.querySelector(".sbl-select-image").value}`);
         else void this.start(liveIndex, button.dataset.action);
       });
@@ -958,6 +961,7 @@ var SceneUI = class {
     root.querySelector('[data-action="stop"]').hidden = !job;
     root.querySelector('[data-action="continue"]').hidden = Boolean(job) || state?.status === "ready";
     root.querySelector('[data-action="rebuild"]').hidden = Boolean(job) || !state?.plan;
+    root.querySelector('[data-action="edit-block"]').hidden = Boolean(job) || !state?.plan;
     root.querySelector(".sbl-message").textContent = state?.error?.message || "";
     const content = root.querySelector(".sbl-content");
     if (!state?.plan) return;
@@ -989,6 +993,57 @@ var SceneUI = class {
       figure.querySelector(".sbl-slot-status").textContent = slot.error?.message || (slot.status === "ready" ? "" : "Ожидает завершения");
       figure.querySelector("button").hidden = Boolean(job);
     });
+  }
+  openBlockEditor(root, index, state) {
+    if (!state?.plan || root.querySelector(".sbl-editor")) return;
+    const editor = document.createElement("div");
+    editor.className = "sbl-editor";
+    editor.innerHTML = '<p>Изменяй HTML/CSS готового блока. В свободном режиме не удаляй <code>data-sbl-slot</code> у картинок.</p><textarea rows="14" spellcheck="false"></textarea><div class="sbl-row"><button type="button" data-action="save-block">Сохранить изменения</button><button type="button" data-action="cancel-block">Отмена</button></div>';
+    editor.querySelector("textarea").value = state.plan.rawHtml || state.plan.artifactHtml || "";
+    root.querySelector(".sbl-content").before(editor);
+    editor.querySelector("textarea").focus();
+  }
+  closeBlockEditor(root) {
+    root.querySelector(".sbl-editor")?.remove();
+  }
+  async saveBlockEditor(root, index) {
+    const editor = root.querySelector(".sbl-editor"), nextText = editor?.querySelector("textarea")?.value;
+    if (!editor || typeof nextText !== "string" || !nextText.trim()) {
+      this.notice("HTML/CSS-блок не может быть пустым.", true);
+      return;
+    }
+    const message = this.getContext().chat[index], state = readState(message);
+    if (!message || !state?.plan) return;
+    let parsed;
+    try {
+      parsed = parsePlan(nextText, this.settings());
+    } catch (error) {
+      this.notice(error.message || "Не удалось разобрать полный блок.", true);
+      return;
+    }
+    const probe = document.createElement("div");
+    try {
+      mountArtifact(probe, parsed.artifactHtml, this.purifier);
+    } catch {
+      this.notice("Не удалось проверить HTML/CSS-блок.", true);
+      return;
+    }
+    const updated = structuredClone(state);
+    updated.plan.artifactHtml = nextText;
+    updated.error = null;
+    updated.plan.artifactHtml = parsed.artifactHtml;
+    updated.plan.rawHtml = parsed.rawHtml;
+    updated.plan.slots = parsed.slots.map((slot, i) => ({ instruction: slot.instruction, src: state.plan.slots[i]?.src || "", status: state.plan.slots[i]?.src ? "ready" : "pending", error: null }));
+    writeState(message, updated);
+    try {
+      await this.getContext().saveChat?.();
+    } catch {
+    }
+    if (this.getContext().chat[index] === message) {
+      this.closeBlockEditor(root);
+      this.renderMessage(index);
+      this.notice("Изменения блока сохранены.");
+    }
   }
   renderTemplate(content, state, job, index) {
     if (content.dataset.plan !== state.id) {
