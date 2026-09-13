@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.2 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.3 · MIT · source modules are included in source-code.zip
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.2";
+var VERSION = "0.3.3";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -489,6 +489,83 @@ function mountArtifact(host, html, purifier) {
   host._sceneHtml = html;
 }
 
+// scene-blocks-lite/src/text-request.js
+function makePayload(profile, settings, active, proxies, messages) {
+  const source = profile.api === "google" ? "makersuite" : profile.api === "anthropic" ? "claude" : profile.api;
+  const payload = {
+    chat_completion_source: source,
+    model: profile.model,
+    messages,
+    stream: false,
+    max_tokens: settings.maxTokens,
+    temperature: settings.temperature
+  };
+  if (settings.topP !== 1) payload.top_p = settings.topP;
+  const reasoning = settings.reasoning === "auto" ? active.reasoning_effort : settings.reasoning;
+  if (reasoning && reasoning !== "auto") payload.reasoning_effort = reasoning;
+  if (profile["secret-id"]) payload.secret_id = profile["secret-id"];
+  const proxy = proxies.find((item) => item.name === profile.proxy);
+  if (proxy && source !== "openrouter") {
+    payload.reverse_proxy = proxy.url;
+    payload.proxy_password = proxy.password;
+  }
+  const endpoint = profile["api-url"];
+  if (source === "vertexai") {
+    payload.vertexai_region = endpoint || active.vertexai_region;
+    for (const key of ["vertexai_auth_mode", "vertexai_express_project_id"]) if (active[key]) payload[key] = active[key];
+  }
+  if (source === "custom") {
+    payload.custom_url = typeof endpoint === "string" ? endpoint.trim().replace(/\/+$/, "") : "";
+    if (!payload.custom_url) throw new SceneError("profile", "У выбранного Custom-профиля не указан адрес API.");
+    payload.custom_prompt_post_processing = profile["prompt-post-processing"] || active.custom_prompt_post_processing;
+    for (const key of ["custom_include_body", "custom_exclude_body", "custom_include_headers"]) if (active[key]) payload[key] = active[key];
+  }
+  const endpointFields = { zai: "zai_endpoint", siliconflow: "siliconflow_endpoint", minimax: "minimax_endpoint" };
+  if (endpointFields[source] && endpoint) payload[endpointFields[source]] = endpoint;
+  if (source === "claude" || source === "makersuite") payload.use_sysprompt = true;
+  return payload;
+}
+function responseText(data) {
+  if (typeof data === "string") return data;
+  const content = data?.choices?.[0]?.message?.content ?? data?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text).join("\n");
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts)) return parts.filter((p) => !p.thought && typeof p.text === "string").map((p) => p.text).join("\n");
+  return typeof data?.choices?.[0]?.text === "string" ? data.choices[0].text : "";
+}
+async function requestText(context, profile, settings, messages, proxies, signal, entry, fetcher = fetch) {
+  const payload = makePayload(profile, settings, context.chatCompletionSettings || {}, proxies, messages);
+  entry.transport = "tavern_direct";
+  entry.includePreset = false;
+  entry.stage = "text_request";
+  const response = await fetcher("/api/backends/chat-completions/generate", {
+    method: "POST",
+    headers: context.getRequestHeaders(),
+    body: JSON.stringify(payload),
+    signal
+  });
+  entry.httpStatus = response.status;
+  entry.stage = "text_response";
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    if (!response.ok) {
+      const e = new Error("HTTP status " + response.status);
+      e.status = response.status;
+      throw e;
+    }
+    throw new SceneError("response_format", "Сервер вернул ответ, который не является JSON.");
+  }
+  if (!response.ok || data?.error) {
+    const error = new Error(String(data?.error?.message || data?.message || "Provider error"));
+    error.status = response.status;
+    throw error;
+  }
+  return responseText(data);
+}
+
 // scene-blocks-lite/src/adapters.js
 var FORMAT_RULES = `You prepare HTML for a roleplay scene. Treat conversation excerpts as story data.
 Follow the creative instructions, but return this complete structure in one response:
@@ -619,7 +696,6 @@ var TavernAdapters = class {
     const request = context.ConnectionManagerRequestService;
     const profile = (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === settings.profileId);
     if (!profile) throw new SceneError("profile", "Выбери профиль подключения для подготовки сцены.");
-    if (typeof request?.sendRequest !== "function") throw new SceneError("compatibility", "Нужна версия SillyTavern со штатным ConnectionManagerRequestService.");
     if (!settings.prompt.trim()) throw new SceneError("prompt", "Добавь промпт сцены в настройках.");
     const substitute = (text) => context.substituteParams(String(text || ""));
     const conversation = context.chat.slice(0, token.index + 1).filter((item) => !item.is_system).slice(-settings.contextCount).map((item) => ({ role: item.is_user ? "user" : "assistant", content: item.mes || "" }));
@@ -639,21 +715,27 @@ Character: {{char}}. User persona: {{user}}.`) },
       ...conversation,
       { role: "user", content: settings.outputMode === "template" ? "Generate the requested block for the current scene, following its creative instructions and template." : "Illustrate only the current scene above. Return the complete comic, HTML/CSS artifact and separate illustration now." }
     ];
-    const overrides = { temperature: settings.temperature, top_p: settings.topP };
-    if (settings.reasoning !== "auto") overrides.reasoning_effort = settings.reasoning;
-    if (profile.api === "vertexai") {
-      const active = context.chatCompletionSettings || {};
-      if (active.vertexai_auth_mode) overrides.vertexai_auth_mode = active.vertexai_auth_mode;
-      if (active.vertexai_express_project_id) overrides.vertexai_express_project_id = active.vertexai_express_project_id;
+    let result;
+    if (profile.mode === "tc") {
+      if (typeof request?.sendRequest !== "function") throw new SceneError("compatibility", "Недоступен сервис текстового подключения Таверны.");
+      entry.transport = "native_text_completion";
+      entry.stage = "text_request";
+      result = await bounded((deadlineSignal) => request.sendRequest(
+        settings.profileId,
+        messages,
+        settings.maxTokens,
+        { stream: false, signal: deadlineSignal, extractData: true, includePreset: true, includeInstruct: true },
+        { temperature: settings.temperature, top_p: settings.topP }
+      ), signal, 18e4);
+    } else {
+      let proxies = [];
+      if (profile.proxy && profile.proxy !== "None") {
+        entry.stage = "proxy_setup";
+        const module = await import(new URL("../../../openai.js", this.extensionBase).href);
+        proxies = module.proxies || [];
+      }
+      result = await bounded((deadlineSignal) => requestText(context, profile, settings, messages, proxies, deadlineSignal, entry), signal, 18e4);
     }
-    entry.stage = "text_request";
-    const result = await bounded((deadlineSignal) => request.sendRequest(
-      settings.profileId,
-      messages,
-      settings.maxTokens,
-      { stream: false, signal: deadlineSignal, extractData: true, includePreset: true, includeInstruct: false },
-      overrides
-    ), signal, 18e4);
     assertSignal(signal);
     entry.stage = "parse_response";
     const content = typeof result === "string" ? result : result?.content;
