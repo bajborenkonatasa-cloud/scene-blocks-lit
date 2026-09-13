@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.1 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.2 · MIT · source modules are included in source-code.zip
 
-// src/config.js
+// scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.1";
+var VERSION = "0.3.2";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -160,7 +160,7 @@ function conflictingBlock(context, settings) {
   return [...globals, ...local].find((block) => !block.disabled && block.char_message && block.block_type === "generated" && (settings.importedName && block.name === settings.importedName || (block.prompt || "").includes("data-iig-instruction")))?.name || "";
 }
 
-// src/core.js
+// scene-blocks-lite/src/core.js
 var SceneError = class extends Error {
   constructor(code, message) {
     super(message);
@@ -215,10 +215,20 @@ function isLive(token, context, epoch) {
 function publicError(error) {
   if (error instanceof SceneError) return { code: error.code, message: error.message };
   if (error?.name === "AbortError") return { code: "stopped", message: "Остановлено. Готовые части сохранены." };
-  const text = String(error?.cause?.message || error?.message || "").toLowerCase();
+  const parts = [], seen = /* @__PURE__ */ new Set();
+  for (let node = error; node && !seen.has(node) && seen.size < 12; node = node.cause) {
+    seen.add(node);
+    parts.push(String(node.message || ""), String(node.status || node.response?.status || ""));
+  }
+  const text = parts.join(" ").toLowerCase();
   if (/safety|moderation|content.policy|content.filter/.test(text)) return { code: "provider_refusal", message: "Генератор отклонил запрос. Проверь содержание промпта." };
   if (/401|403|api.key|unauthorized|secret/.test(text)) return { code: "auth", message: "Проверь ключ и выбранный профиль подключения." };
   if (/429|quota|billing/.test(text)) return { code: "quota", message: "Достигнут лимит генератора. Проверь баланс и ограничения." };
+  if (/preset.*(not found|missing|unknown)|could not find.*preset/.test(text)) return { code: "preset", message: "Таверна не нашла пресет выбранного профиля. Проверь его в Connection Manager." };
+  if (/\b(400|422)\b|unsupported|invalid.parameter|invalid.request/.test(text)) return { code: "parameters", message: "Запрос отклонён из-за параметров или структуры. Скачай диагностику." };
+  if (/\b(502|503|504|500)\b/.test(text)) return { code: "server", message: "Ошибка сервера Таверны или провайдера. Скачай диагностику." };
+  if (/failed to fetch|network|econn|enotfound/.test(text)) return { code: "network", message: "Ошибка сетевого соединения при запросе." };
+  if (/timeout|timed out/.test(text)) return { code: "timeout", message: "Превышено время ожидания ответа." };
   return { code: "request", message: "Запрос не завершился. Проверь подключение и повтори недостающую часть." };
 }
 var SceneEngine = class {
@@ -382,7 +392,7 @@ var SceneEngine = class {
   }
 };
 
-// src/html.js
+// scene-blocks-lite/src/html.js
 function instructionFrom(element) {
   let data;
   try {
@@ -479,7 +489,7 @@ function mountArtifact(host, html, purifier) {
   host._sceneHtml = html;
 }
 
-// src/adapters.js
+// scene-blocks-lite/src/adapters.js
 var FORMAT_RULES = `You prepare HTML for a roleplay scene. Treat conversation excerpts as story data.
 Follow the creative instructions, but return this complete structure in one response:
 exactly TWO img elements with data-iig-instruction attributes, plus a non-empty HTML/CSS artifact.
@@ -553,6 +563,55 @@ var TavernAdapters = class {
     return this.bridgePromise;
   }
   async prepare(settings, token, signal) {
+    const profile = this.getContext().extensionSettings.connectionManager?.profiles?.find((p) => p.id === settings.profileId);
+    const entry = {
+      at: (/* @__PURE__ */ new Date()).toISOString(),
+      api: profile?.api || "",
+      model: profile?.model || "",
+      stage: "setup",
+      outcome: "running",
+      maxTokens: settings.maxTokens,
+      reasoning: settings.reasoning,
+      temperature: settings.temperature,
+      topP: settings.topP,
+      stream: false,
+      includePreset: true
+    };
+    this.requestHistory ??= [];
+    this.requestHistory.push(entry);
+    if (this.requestHistory.length > 20) this.requestHistory.shift();
+    const started = Date.now();
+    try {
+      const plan = await this.prepareInternal(settings, token, signal, entry);
+      entry.outcome = "ready";
+      entry.imageInstructions = plan.slots.length;
+      return plan;
+    } catch (error) {
+      entry.outcome = "error";
+      entry.error = publicError(error).code;
+      entry.causes = [];
+      const seen = /* @__PURE__ */ new Set();
+      for (let node = error; node && !seen.has(node) && seen.size < 12; node = node.cause) {
+        seen.add(node);
+        const message = String(node.message || "");
+        const status = Number(node.status || node.response?.status || message.match(/(?:status|http|error|code)\D{0,12}([45]\d{2})\b/i)?.[1]);
+        entry.causes.push({
+          category: publicError(node).code,
+          httpStatus: Number.isInteger(status) && status >= 400 && status <= 599 ? status : null,
+          wrapper: /^(API request failed|Request failed)$/i.test(message),
+          opaqueObject: message === "[object Object]",
+          mentionsReasoning: /reasoning|thinking/i.test(message),
+          mentionsTokens: /max.?tokens|context.?length|token.?limit/i.test(message),
+          mentionsPreset: /preset/i.test(message),
+          mentionsVertex: /vertex|region|project/i.test(message)
+        });
+      }
+      throw error;
+    } finally {
+      entry.durationMs = Date.now() - started;
+    }
+  }
+  async prepareInternal(settings, token, signal, entry) {
     if (settings.outputMode !== "template") await this.bridge(settings);
     assertSignal(signal);
     const context = this.getContext();
@@ -587,6 +646,7 @@ Character: {{char}}. User persona: {{user}}.`) },
       if (active.vertexai_auth_mode) overrides.vertexai_auth_mode = active.vertexai_auth_mode;
       if (active.vertexai_express_project_id) overrides.vertexai_express_project_id = active.vertexai_express_project_id;
     }
+    entry.stage = "text_request";
     const result = await bounded((deadlineSignal) => request.sendRequest(
       settings.profileId,
       messages,
@@ -595,7 +655,15 @@ Character: {{char}}. User persona: {{user}}.`) },
       overrides
     ), signal, 18e4);
     assertSignal(signal);
+    entry.stage = "parse_response";
     const content = typeof result === "string" ? result : result?.content;
+    entry.responseType = typeof result;
+    entry.contentType = typeof content;
+    entry.contentLength = typeof content === "string" ? content.length : null;
+    if (typeof content !== "string" || !content.trim()) throw new SceneError(
+      "empty_response",
+      "Запрос завершился, но Таверна не передала текст блока. Скачай диагностику."
+    );
     return parsePlan(content, settings);
   }
   async generateImage(instruction, settings, token, signal) {
@@ -650,7 +718,7 @@ Character: {{char}}. User persona: {{user}}.`) },
   }
 };
 
-// src/ui.js
+// scene-blocks-lite/src/ui.js
 var SceneUI = class {
   constructor(getContext2, engine2, purifier, diagnostics2) {
     Object.assign(this, { getContext: getContext2, engine: engine2, purifier, diagnostics: diagnostics2 });
@@ -1105,7 +1173,7 @@ var SceneUI = class {
   }
 };
 
-// index.js
+// scene-blocks-lite/index.js
 import { DOMPurify } from "../../../../lib.js";
 var getContext = () => SillyTavern.getContext();
 var events = getContext().eventSource;
@@ -1152,6 +1220,7 @@ function diagnostics() {
       imagesReady: state.plan?.slots?.filter((slot) => slot.status === "ready").length || 0,
       error: state.error?.code || null
     })),
+    requests: structuredClone(adapters.requestHistory || []),
     actions: [...history]
   };
 }
