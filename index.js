@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.3 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.4 · MIT · source modules are included in source-code.zip
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.3";
+var VERSION = "0.3.4";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -180,18 +180,29 @@ var swipeId = (message) => Number.isInteger(message.swipe_id) ? message.swipe_id
 var chatKey = (context) => JSON.stringify([context.getCurrentChatId?.() ?? context.chatId ?? "", context.groupId ?? "", context.characterId ?? ""]);
 function readState(message) {
   if (!message) return null;
-  const source = fingerprint(message.mes || "");
-  return [message.extra?.[KEY], message.swipe_info?.[swipeId(message)]?.extra?.[KEY]].find((state) => [1, 2].includes(state?.version) && state.source === source) || null;
+  const valid = (state) => [1, 2].includes(state?.version);
+  const index = swipeId(message);
+  const scoped = message.swipe_info?.[index]?.extra?.[KEY];
+  if (valid(scoped)) return scoped;
+  const root = message.extra?.[KEY];
+  if (!valid(root)) return null;
+  if (Number.isInteger(root.ownerSwipe)) return root.ownerSwipe === index ? root : null;
+  const otherOwner = message.swipe_info?.findIndex((info) => info?.extra?.[KEY]?.id === root.id) ?? -1;
+  if (otherOwner >= 0) return otherOwner === index ? root : null;
+  if (root.source === fingerprint(message.mes || "")) return root;
+  const hasSwipes = Array.isArray(message.swipes) || Array.isArray(message.swipe_info) || message.swipe_id !== void 0;
+  return !hasSwipes || index === 0 ? root : null;
 }
 function writeState(message, state) {
+  const saved = { ...state, ownerSwipe: swipeId(message) };
   message.extra ??= {};
-  message.extra[KEY] = structuredClone(state);
+  message.extra[KEY] = structuredClone(saved);
   if (Array.isArray(message.swipes) || Array.isArray(message.swipe_info) || message.swipe_id !== void 0) {
     const index = swipeId(message);
     message.swipe_info ??= [];
     message.swipe_info[index] ??= {};
     message.swipe_info[index].extra ??= {};
-    message.swipe_info[index].extra[KEY] = structuredClone(state);
+    message.swipe_info[index].extra[KEY] = structuredClone(saved);
   }
 }
 function capture(context, index, epoch) {
