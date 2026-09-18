@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.4 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.5 · MIT · source modules are included in source-code.zip
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.4";
+var VERSION = "0.3.5";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -831,6 +831,7 @@ var SceneUI = class {
   }
   async start(index, mode = "continue", automatic = false) {
     try {
+      if (this.getContext().chat[index]?.is_system) throw new Error("Сообщение скрыто от ИИ. Готовую сцену можно просматривать и редактировать; для новой генерации сначала включи сообщение в контекст.");
       const settings = this.settings();
       const duplicate = conflictingBlock(this.getContext(), settings);
       if (duplicate) throw new Error(`Выключи старый блок «${duplicate}» в ExtBlocks, чтобы не запускать две генерации одной сцены.`);
@@ -1073,7 +1074,9 @@ var SceneUI = class {
   renderMessage(index) {
     const message = this.getContext().chat[index];
     const mes = document.querySelector(`#chat .mes[mesid="${index}"]`);
-    if (!mes || !message || message.is_user || message.is_system) return;
+    if (!mes || !message || message.is_user) return;
+    const state = readState(message), job = this.engine.active(index);
+    if (message.is_system && !state?.plan) return;
     let action = mes.querySelector(".sbl-open");
     if (!action) {
       const menu = mes.querySelector(".extraMesButtons") || mes.querySelector(".mes_buttons");
@@ -1085,12 +1088,15 @@ var SceneUI = class {
         action.title = "Создать или продолжить сцену";
         action.addEventListener("click", (event) => {
           event.stopPropagation();
-          void this.start(Number(mes.getAttribute("mesid")));
+          const currentIndex = Number(mes.getAttribute("mesid"));
+          if (this.getContext().chat[currentIndex]?.is_system) {
+            mes.querySelector(".sbl-output")?.scrollIntoView?.({ block: "nearest" });
+          } else void this.start(currentIndex);
         });
         menu.append(action);
       }
     }
-    const state = readState(message), job = this.engine.active(index);
+    if (action) action.title = message.is_system ? "Показать сохранённую сцену" : "Создать или продолжить сцену";
     let root = mes.querySelector(".sbl-output");
     if (!state && !job) {
       const oldHost = root?.querySelector(".sbl-artifact");
@@ -1120,8 +1126,8 @@ var SceneUI = class {
     const labels = { ready: "Сцена готова", partial: "Готово частично", paused: "На паузе", error: "Нужно повторить", images: "Можно продолжить" };
     root.querySelector(".sbl-status").textContent = job?.label || labels[state?.status] || "Подготовка";
     root.querySelector('[data-action="stop"]').hidden = !job;
-    root.querySelector('[data-action="continue"]').hidden = Boolean(job) || state?.status === "ready";
-    root.querySelector('[data-action="rebuild"]').hidden = Boolean(job) || !state?.plan;
+    root.querySelector('[data-action="continue"]').hidden = Boolean(job) || message.is_system || state?.status === "ready";
+    root.querySelector('[data-action="rebuild"]').hidden = Boolean(job) || message.is_system || !state?.plan;
     root.querySelector('[data-action="edit-block"]').hidden = Boolean(job) || !state?.plan;
     root.querySelector(".sbl-message").textContent = state?.error?.message || "";
     const content = root.querySelector(".sbl-content");
@@ -1152,7 +1158,7 @@ var SceneUI = class {
         link.href = slot.src;
       }
       figure.querySelector(".sbl-slot-status").textContent = slot.error?.message || (slot.status === "ready" ? "" : "Ожидает завершения");
-      figure.querySelector("button").hidden = Boolean(job);
+      figure.querySelector("button").hidden = Boolean(job) || Boolean(message.is_system);
     });
   }
   openBlockEditor(root, index, state) {
@@ -1261,7 +1267,7 @@ var SceneUI = class {
     link.hidden = !hasFile;
     if (hasFile) link.href = selected.src;
     else link.removeAttribute("href");
-    tools.querySelector("button").disabled = Boolean(job) || !selected;
+    tools.querySelector("button").disabled = Boolean(job) || !selected || Boolean(this.getContext().chat[index]?.is_system);
     tools.querySelector(".sbl-selection-status").textContent = selected?.error?.message || "";
   }
 };
