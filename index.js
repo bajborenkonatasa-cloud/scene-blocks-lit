@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.5 · MIT · source modules are included in source-code.zip
+// Scene Blocks Lite 0.3.6 · MIT · NovelAI Worker backend added without changing the SillyImages path
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.5";
+var VERSION = "0.3.6";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -29,6 +29,9 @@ var DEFAULTS = Object.freeze({
   reasoning: "medium",
   pauseOffscreen: true,
   sillyImagesFolder: "sillyimages",
+  imageBackend: "sillyimages",
+  novelAiWorkerUrl: "",
+  novelAiStyleMode: "worker",
   importedName: "",
   outputMode: "strict",
   maxImages: 8,
@@ -37,7 +40,7 @@ var DEFAULTS = Object.freeze({
 var numberIn = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback;
 function normalizeFields(raw = {}) {
   const result = { ...DEFAULTS };
-  for (const key of ["profileId", "prompt", "template", "extraContext", "sillyImagesFolder", "importedName", "presetName"]) {
+  for (const key of ["profileId", "prompt", "template", "extraContext", "sillyImagesFolder", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "presetName"]) {
     if (typeof raw[key] === "string") result[key] = raw[key];
   }
   for (const key of ["auto", "pauseOffscreen"]) {
@@ -48,11 +51,13 @@ function normalizeFields(raw = {}) {
   result.temperature = numberIn(raw.temperature, 0.8, 0, 2);
   result.topP = numberIn(raw.topP, 0.9, 0, 1);
   result.reasoning = ["auto", "min", "low", "medium", "high", "max"].includes(raw.reasoning) ? raw.reasoning : "medium";
+  result.imageBackend = ["sillyimages", "novelai_worker"].includes(raw.imageBackend) ? raw.imageBackend : "sillyimages";
+  result.novelAiStyleMode = ["worker", "merge"].includes(raw.novelAiStyleMode) ? raw.novelAiStyleMode : "worker";
   result.outputMode = raw.outputMode === "template" ? "template" : "strict";
   result.maxImages = Math.round(numberIn(raw.maxImages, 8, 1, 20));
   return result;
 }
-var PRESET_FIELDS = ["profileId", "prompt", "template", "extraContext", "contextCount", "maxTokens", "temperature", "topP", "reasoning", "importedName", "outputMode", "maxImages"];
+var PRESET_FIELDS = ["profileId", "prompt", "template", "extraContext", "contextCount", "maxTokens", "temperature", "topP", "reasoning", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "outputMode", "maxImages"];
 function snapshot(raw) {
   const settings = normalizeFields(raw);
   return Object.fromEntries(PRESET_FIELDS.map((key) => [key, settings[key]]));
@@ -100,7 +105,7 @@ function deletePreset(raw) {
 }
 function newPreset(raw) {
   const settings = savePreset(raw);
-  return savePreset({ ...settings, auto: false, presetName: "Новый промпт", prompt: "", template: "", extraContext: "", importedName: "", outputMode: "template" }, { asNew: true });
+  return savePreset({ ...settings, auto: false, presetName: "Новый промпт", prompt: "", template: "", extraContext: "", importedName: "", outputMode: "template", imageBackend: "sillyimages", novelAiWorkerUrl: "", novelAiStyleMode: "worker" }, { asNew: true });
 }
 function rememberPreset(raw, candidate) {
   const current = normalizeSettings(raw);
@@ -146,7 +151,10 @@ function importBlock(raw, current, context) {
     maxTokens: preset?.max_tokens ?? current.maxTokens,
     temperature: preset?.temperature ?? current.temperature,
     topP: preset?.top_p ?? current.topP,
-    reasoning: preset?.reasoning_effort ?? current.reasoning
+    reasoning: preset?.reasoning_effort ?? current.reasoning,
+    imageBackend: "sillyimages",
+    novelAiWorkerUrl: "",
+    novelAiStyleMode: "worker"
   });
 }
 function conflictingBlock(context, settings) {
@@ -760,6 +768,12 @@ Character: {{char}}. User persona: {{user}}.`) },
     return parsePlan(content, settings);
   }
   async generateImage(instruction, settings, token, signal) {
+    if (settings.imageBackend === "novelai_worker") {
+      return this.generateImageViaNovelAiWorker(instruction, settings, token, signal);
+    }
+    return this.generateImageViaSillyImages(instruction, settings, token, signal);
+  }
+  async generateImageViaSillyImages(instruction, settings, token, signal) {
     const bridge = await this.bridge(settings);
     assertSignal(signal);
     if (!isLive(token, this.getContext(), token.epoch)) throw new DOMException("Stopped", "AbortError");
@@ -774,6 +788,68 @@ Character: {{char}}. User persona: {{user}}.`) },
       messageId: token.index,
       signal: deadlineSignal
     }), signal);
+  }
+  workerUrl(settings, { ping = false } = {}) {
+    const raw = String(settings.novelAiWorkerUrl || "").trim();
+    if (!raw) throw new SceneError("worker_url", "Для NovelAI Worker вставь ссылку облака в настройках этого промпта.");
+    let url;
+    try {
+      url = new URL(raw);
+    } catch {
+      throw new SceneError("worker_url", "Ссылка NovelAI Worker выглядит неверно. Нужен полный адрес https://...");
+    }
+    if (!/^https?:$/.test(url.protocol)) throw new SceneError("worker_url", "NovelAI Worker должен использовать http:// или https://.");
+    if (ping) url.searchParams.set("ping", "1");
+    return url;
+  }
+  async generateImageViaNovelAiWorker(instruction, settings, token, signal) {
+    assertSignal(signal);
+    if (!isLive(token, this.getContext(), token.epoch)) throw new DOMException("Stopped", "AbortError");
+    const prompt = String(instruction.prompt || "").trim();
+    if (!prompt) throw new SceneError("prompt", "В блоке NovelAI нет промпта изображения.");
+    const style = String(instruction.style || "").trim();
+    const finalPrompt = settings.novelAiStyleMode === "merge" && style ? `${style}, ${prompt}` : prompt;
+    const url = this.workerUrl(settings);
+    url.searchParams.set("prompt", finalPrompt);
+    url.searchParams.set("aspect_ratio", instruction.aspect_ratio || "9:16");
+    const response = await bounded((deadlineSignal) => fetch(url.toString(), {
+      method: "GET",
+      headers: { "Accept": "image/png,image/*;q=0.9,*/*;q=0.5" },
+      signal: deadlineSignal,
+      cache: "no-store"
+    }), signal, 18e4);
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 240);
+      } catch {
+      }
+      throw new SceneError("worker", `NovelAI Worker вернул HTTP ${response.status}${detail ? `: ${detail}` : "."}`);
+    }
+    const type = (response.headers.get("content-type") || "").toLowerCase();
+    const blob = await response.blob();
+    if (!type.startsWith("image/") && !blob.type.startsWith("image/")) {
+      throw new SceneError("image_format", "NovelAI Worker ответил, но вернул не изображение. Проверь ссылку и Worker.");
+    }
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new SceneError("image_format", "Не удалось прочитать PNG от NovelAI Worker."));
+      reader.onerror = () => reject(new SceneError("image_format", "Не удалось прочитать PNG от NovelAI Worker."));
+      reader.readAsDataURL(blob);
+    });
+  }
+  async testNovelAiWorker(settings, signal) {
+    const url = this.workerUrl(settings, { ping: true });
+    const response = await bounded((deadlineSignal) => fetch(url.toString(), {
+      method: "GET",
+      headers: { "Accept": "image/png,image/*;q=0.9,*/*;q=0.5" },
+      signal: deadlineSignal,
+      cache: "no-store"
+    }), signal, 3e4);
+    if (!response.ok) throw new SceneError("worker", `Worker недоступен: HTTP ${response.status}.`);
+    const type = (response.headers.get("content-type") || "").toLowerCase();
+    if (!type.startsWith("image/")) throw new SceneError("worker", "Worker ответил, но ping вернул не изображение. Возможно, эта ссылка не поддерживает ?ping=1.");
+    return true;
   }
   async persistImage(generated, settings, token, signal) {
     const { utils } = await this.bridge(settings);
@@ -864,6 +940,16 @@ var SceneUI = class {
             <label>Формат результата<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → отдельная картинка</option></select></label>
             <label class="sbl-check"><input id="sbl-auto" type="checkbox"> Автоматически после нового ответа</label>
             <label>Подключение для подготовки сцены<select id="sbl-profile"></select></label>
+            <div class="sbl-provider-card">
+              <div class="sbl-provider-title"><span>🖼️</span><strong>Источник изображения</strong><span id="sbl-backendBadge" class="sbl-badge"></span></div>
+              <label>Куда отправлять новые картинки<select id="sbl-imageBackend"><option value="sillyimages">🍌 SillyImages · как сейчас</option><option value="novelai_worker">🌙 NovelAI · через Worker</option></select></label>
+              <div id="sbl-novelAiFields" class="sbl-provider-fields">
+                <label>NovelAI Worker URL<input id="sbl-novelAiWorkerUrl" type="url" placeholder="https://example.workers.dev/" spellcheck="false"></label>
+                <label>Стиль NovelAI<select id="sbl-novelAiStyleMode"><option value="worker">Стиль добавляет Worker</option><option value="merge">Добавить style из блока к prompt</option></select></label>
+                <div class="sbl-row sbl-provider-actions"><button type="button" id="sbl-test-worker">Проверить Worker</button><span id="sbl-worker-status" class="sbl-worker-status" aria-live="polite"></span></div>
+                <p class="sbl-muted sbl-provider-help">Worker получает prompt и aspect_ratio, обращается к NovelAI и возвращает PNG. Готовый PNG сохраняется в Tavern как и раньше, поэтому старые сцены не зависят от текущего источника.</p>
+              </div>
+            </div>
             <button type="button" id="sbl-refresh">Обновить списки</button>
             <label>Промпт из активного набора ExtBlocks<select id="sbl-ext-block"></select></label>
             <div class="sbl-row"><button type="button" id="sbl-from-ext">Перенести из ExtBlocks</button><button type="button" id="sbl-all-ext">Сохранить весь набор G-блоков</button></div>
@@ -884,7 +970,7 @@ var SceneUI = class {
               <label>Уровень рассуждения<select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальный</option><option value="low">Низкий</option><option value="medium">Средний</option><option value="high">Высокий</option><option value="max">Максимальный</option></select></label>
               <label>Папка установленного SillyImages<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label>
               <label class="sbl-check"><input id="sbl-pauseOffscreen" type="checkbox"> Приостанавливать анимации за экраном</label>
-              <p class="sbl-muted">Модель картинок и референсы настраиваются в SillyImages. Разрешение остаётся таким, как указано в промпте.</p>
+              <p class="sbl-muted">В режиме SillyImages всё работает как раньше: модель, стили и референсы берутся оттуда. В режиме NovelAI Worker генерация идёт через указанную облачную ссылку; SillyImages остаётся установленным для совместимости, локального сохранения и альбома.</p>
             </details>
             <div class="sbl-row"><button type="button" id="sbl-save">Сохранить</button><button type="button" id="sbl-run" class="sbl-primary">Создать / продолжить</button><button type="button" id="sbl-stop">Стоп</button></div>
             <button type="button" id="sbl-debug">Скачать диагностику</button>
@@ -930,6 +1016,29 @@ var SceneUI = class {
     });
     on2("sbl-auto", "change", () => this.readInputs());
     on2("sbl-profile", "change", () => this.readInputs());
+    on2("sbl-imageBackend", "change", () => {
+      this.readInputs();
+      this.updateProviderUI();
+    });
+    on2("sbl-novelAiStyleMode", "change", () => this.readInputs());
+    on2("sbl-test-worker", "click", async () => {
+      this.readInputs();
+      const status = document.getElementById("sbl-worker-status");
+      const button = document.getElementById("sbl-test-worker");
+      button.disabled = true;
+      status.textContent = "Проверяю…";
+      status.classList.remove("sbl-ok", "sbl-bad");
+      try {
+        await adapters.testNovelAiWorker(this.settings());
+        status.textContent = "● Worker отвечает";
+        status.classList.add("sbl-ok");
+      } catch (error) {
+        status.textContent = `● ${error.message || "Worker недоступен"}`;
+        status.classList.add("sbl-bad");
+      } finally {
+        button.disabled = false;
+      }
+    });
     on2("sbl-refresh", "click", () => {
       this.fillProfiles();
       this.fillExtBlocks();
@@ -1049,7 +1158,24 @@ var SceneUI = class {
     this.fillProfiles();
     this.fillExtBlocks();
     this.fillSavedPresets();
-    document.getElementById("sbl-current-prompt").textContent = `Текущий промпт: ${settings.presetName}. За один запуск используется только он.`;
+    this.updateProviderUI();
+    const backendName = settings.imageBackend === "novelai_worker" ? "NovelAI Worker" : "SillyImages";
+    document.getElementById("sbl-current-prompt").textContent = `Текущий промпт: ${settings.presetName} · ${backendName}. За один запуск используется только он.`;
+  }
+  updateProviderUI() {
+    const settings = this.settings();
+    const fields = document.getElementById("sbl-novelAiFields");
+    const badge = document.getElementById("sbl-backendBadge");
+    if (fields) fields.hidden = settings.imageBackend !== "novelai_worker";
+    if (badge) {
+      badge.textContent = settings.imageBackend === "novelai_worker" ? "NovelAI" : "SillyImages";
+      badge.dataset.backend = settings.imageBackend;
+    }
+    const status = document.getElementById("sbl-worker-status");
+    if (status && settings.imageBackend !== "novelai_worker") {
+      status.textContent = "";
+      status.classList.remove("sbl-ok", "sbl-bad");
+    }
   }
   fillSavedPresets() {
     const settings = this.settings(), select = document.getElementById("sbl-presetChoice");
@@ -1313,6 +1439,9 @@ function diagnostics() {
     outputMode: settings.outputMode,
     savedPrompts: settings.presets.length,
     maxImages: settings.maxImages,
+    imageBackend: settings.imageBackend,
+    workerConfigured: Boolean(settings.novelAiWorkerUrl?.trim()),
+    novelAiStyleMode: settings.novelAiStyleMode,
     queue: engine.jobs.size,
     sceneStates: context.chat.map(readState).filter(Boolean).slice(-10).map((state) => ({
       status: state.status,
