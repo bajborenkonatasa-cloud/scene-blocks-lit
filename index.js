@@ -2,7 +2,7 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.7";
+var VERSION = "0.3.8";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -985,7 +985,7 @@ var SceneUI = class {
             <p id="sbl-current-prompt" class="sbl-muted"></p>
             <div class="sbl-share-box">
               <div class="sbl-share-title">📦 Поделиться промптом</div>
-              <p class="sbl-muted">Для друзей без старого ExtBlocks: один JSON содержит выбранный промпт, шаблон и его настройки. Локальный профиль модели подбирается по имени, а если совпадения нет — остаётся профиль получателя.</p>
+              <p class="sbl-muted">Можно загрузить как JSON промпта Scene Blocks Lite, так и один generated G-блок старого ExtBlocks. Один файл добавляется как новый сохранённый промпт; существующие промпты не стираются. Профиль модели подбирается по имени, а если совпадения нет — остаётся профиль получателя.</p>
               <div class="sbl-row"><button type="button" id="sbl-prompt-import">📥 Загрузить промпт JSON</button><button type="button" id="sbl-prompt-export">📤 Скачать выбранный промпт JSON</button></div>
             </div>
             <details class="sbl-legacy-tools"><summary>Совместимость и резервная копия</summary>
@@ -1157,12 +1157,21 @@ var SceneUI = class {
   acceptPromptImport(raw) {
     this.readInputs();
     let settings = this.settings();
-    const candidate = importPromptExport(raw, settings, this.getContext());
+    let candidate;
+    let sourceLabel = "Scene Blocks Lite";
+    if (raw?.kind === `${KEY}_prompt`) {
+      candidate = importPromptExport(raw, settings, this.getContext());
+    } else if (raw?.block_type === "generated" && typeof raw.prompt === "string" && typeof raw.template === "string") {
+      candidate = importBlock(raw, settings, this.getContext());
+      sourceLabel = "ExtBlocks G-блок";
+    } else {
+      throw new Error("Неизвестный JSON. Поддерживается файл промпта Scene Blocks Lite или один generated G-блок ExtBlocks.");
+    }
     settings = rememberPreset(settings, candidate);
     settings.auto = false;
     this.store(settings);
     this.fillSettings();
-    this.notice("Промпт JSON добавлен в «Мои сохранённые промпты». Проверь профиль подготовки сцены и нажми «Сохранить».");
+    this.notice(`${sourceLabel} импортирован в «Мои сохранённые промпты». Проверь профиль подготовки сцены, источник картинки и нажми «Сохранить».`);
   }
   acceptImport(raw) {
     if (raw?.kind === `${KEY}_prompt`) {
