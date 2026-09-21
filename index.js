@@ -2,7 +2,7 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.6";
+var VERSION = "0.3.7";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -114,6 +114,35 @@ function rememberPreset(raw, candidate) {
   const same = current.presets.find((preset) => preset.name === name && JSON.stringify(preset.settings) === JSON.stringify(data));
   if (same) return selectPreset({ ...current, auto: false }, same.id);
   return savePreset({ ...current, ...data, presetName: name, auto: false }, { asNew: true });
+}
+function makePromptExport(settings, context) {
+  const normalized = normalizeSettings(settings);
+  const active = normalized.presets.find((item) => item.id === normalized.activePresetId) || normalized.presets[0];
+  if (!active) throw new Error("Нет выбранного промпта для экспорта.");
+  const profile = (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === active.settings.profileId);
+  return {
+    kind: `${KEY}_prompt`,
+    version: VERSION,
+    name: active.name,
+    profileName: profile?.name || "",
+    settings: { ...active.settings, profileId: "" }
+  };
+}
+function importPromptExport(raw, current, context) {
+  if (!raw || raw.kind !== `${KEY}_prompt` || !raw.settings || typeof raw.settings.prompt !== "string") {
+    throw new Error("Это не файл промпта Scene Blocks Lite.");
+  }
+  const profiles = context.extensionSettings.connectionManager?.profiles || [];
+  const currentProfileId = current.profileId || "";
+  const matched = raw.profileName ? profiles.find((item) => item.name === raw.profileName) : null;
+  return {
+    ...current,
+    ...raw.settings,
+    profileId: matched?.id || currentProfileId,
+    presetName: String(raw.name || "Импортированный промпт").slice(0, 100),
+    importedName: "",
+    auto: false
+  };
 }
 function getSettings(context) {
   const settings = normalizeSettings(context.extensionSettings[KEY]);
@@ -954,8 +983,16 @@ var SceneUI = class {
             <label>Промпт из активного набора ExtBlocks<select id="sbl-ext-block"></select></label>
             <div class="sbl-row"><button type="button" id="sbl-from-ext">Перенести из ExtBlocks</button><button type="button" id="sbl-all-ext">Сохранить весь набор G-блоков</button></div>
             <p id="sbl-current-prompt" class="sbl-muted"></p>
-            <div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока</button><button type="button" id="sbl-export">Экспорт настроек</button></div>
+            <div class="sbl-share-box">
+              <div class="sbl-share-title">📦 Поделиться промптом</div>
+              <p class="sbl-muted">Для друзей без старого ExtBlocks: один JSON содержит выбранный промпт, шаблон и его настройки. Локальный профиль модели подбирается по имени, а если совпадения нет — остаётся профиль получателя.</p>
+              <div class="sbl-row"><button type="button" id="sbl-prompt-import">📥 Загрузить промпт JSON</button><button type="button" id="sbl-prompt-export">📤 Скачать выбранный промпт JSON</button></div>
+            </div>
+            <details class="sbl-legacy-tools"><summary>Совместимость и резервная копия</summary>
+              <div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока / полного экспорта</button><button type="button" id="sbl-export">Экспорт всех настроек</button></div>
+            </details>
             <input id="sbl-file" type="file" accept="application/json,.json" hidden>
+            <input id="sbl-prompt-file" type="file" accept="application/json,.json" hidden>
             <details><summary>Промпт и шаблон</summary>
               <label>Творческая инструкция<textarea id="sbl-prompt" rows="10"></textarea></label>
               <label>HTML-шаблон (в свободном режиме можно оставить пустым)<textarea id="sbl-template" rows="7"></textarea></label>
@@ -1048,6 +1085,27 @@ var SceneUI = class {
       void this.start(this.lastMessage());
     });
     on2("sbl-stop", "click", () => this.engine.stop());
+    on2("sbl-prompt-import", "click", () => section.querySelector("#sbl-prompt-file").click());
+    on2("sbl-prompt-file", "change", async (event) => {
+      try {
+        const file = event.target.files[0];
+        if (!file) return;
+        if (file.size > 2e6) throw new Error("Файл слишком большой для одного промпта.");
+        const raw = JSON.parse(await file.text());
+        this.acceptPromptImport(raw);
+      } catch (error) {
+        this.notice(error.message || "Не удалось прочитать JSON промпта.", true);
+      } finally {
+        event.target.value = "";
+      }
+    });
+    on2("sbl-prompt-export", "click", () => {
+      this.readInputs();
+      const data = makePromptExport(this.settings(), this.getContext());
+      const safe = String(data.name || "prompt").replace(/[\/:*?"<>|]+/g, "-").trim().slice(0, 80) || "prompt";
+      this.download(`Scene-Blocks-prompt-${safe}.json`, data);
+      this.notice("Выбранный промпт сохранён в JSON. Его можно отправить другому пользователю Scene Blocks Lite.");
+    });
     on2("sbl-import", "click", () => section.querySelector("#sbl-file").click());
     on2("sbl-file", "change", async (event) => {
       try {
@@ -1096,7 +1154,21 @@ var SceneUI = class {
     });
     on2("sbl-debug", "click", () => this.download("Scene-Blocks-debug.json", this.diagnostics()));
   }
+  acceptPromptImport(raw) {
+    this.readInputs();
+    let settings = this.settings();
+    const candidate = importPromptExport(raw, settings, this.getContext());
+    settings = rememberPreset(settings, candidate);
+    settings.auto = false;
+    this.store(settings);
+    this.fillSettings();
+    this.notice("Промпт JSON добавлен в «Мои сохранённые промпты». Проверь профиль подготовки сцены и нажми «Сохранить».");
+  }
   acceptImport(raw) {
+    if (raw?.kind === `${KEY}_prompt`) {
+      this.acceptPromptImport(raw);
+      return;
+    }
     this.readInputs();
     let settings = this.settings();
     const imported = importBlock(raw, settings, this.getContext());

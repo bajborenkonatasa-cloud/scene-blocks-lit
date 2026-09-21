@@ -37,3 +37,24 @@
 .sbl-provider-fields{display:grid;gap:10px;padding-top:2px}.sbl-provider-actions{align-items:center}.sbl-worker-status{font-size:.86em;overflow-wrap:anywhere}.sbl-worker-status.sbl-ok{color:#8bd5a6}.sbl-worker-status.sbl-bad{color:#ffb3a8}.sbl-provider-help{margin:0;line-height:1.45}
 #sbl-settings>summary{display:flex;align-items:center;gap:7px}#sbl-settings>summary::before{content:"🎬"}.sbl-settings-body>details{padding:0 10px;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#53606c) 65%,transparent);border-radius:10px}.sbl-settings-body>details>summary{font-weight:650}
 @media(max-width:480px){.sbl-provider-card{padding:10px}.sbl-provider-actions button{flex:1 1 150px}.sbl-worker-status{flex-basis:100%}}
+
+
+/* 0.3.7 · prompt sharing */
+#sbl-settings .sbl-share-box {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #6ea8fe) 55%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #111) 88%, var(--SmartThemeQuoteColor, #6ea8fe) 12%);
+}
+#sbl-settings .sbl-share-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+#sbl-settings .sbl-legacy-tools {
+  margin: 8px 0 12px;
+  opacity: .92;
+}
+#sbl-settings .sbl-legacy-tools > summary {
+  cursor: pointer;
+}
