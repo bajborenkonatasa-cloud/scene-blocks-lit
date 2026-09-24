@@ -28,7 +28,7 @@ var DEFAULTS = Object.freeze({
   topP: 0.9,
   reasoning: "medium",
   pauseOffscreen: true,
-  sillyImagesFolder: "sillyimages",
+  sillyImagesFolder: "Silly-Images-Plus",
   imageBackend: "sillyimages",
   novelAiWorkerUrl: "",
   novelAiStyleMode: "worker",
@@ -666,23 +666,38 @@ var TavernAdapters = class {
     this.bridgeFolder = "";
   }
   async bridge(settings) {
-    const folder = settings.sillyImagesFolder.trim();
-    if (!/^[a-z0-9][a-z0-9_.-]{0,80}$/i.test(folder)) throw new SceneError("bridge", "Проверь название папки SillyImages.");
+    const configuredFolder = settings.sillyImagesFolder.trim();
+    if (!/^[a-z0-9][a-z0-9_.-]{0,80}$/i.test(configuredFolder)) throw new SceneError("bridge", "Проверь название папки SillyImages / Silly Images Plus.");
     const disabled = this.getContext().extensionSettings.disabledExtensions || [];
-    if (disabled.includes(`third-party/${folder}`)) throw new SceneError("bridge", "Включи установленное расширение SillyImages.");
-    if (!this.bridgePromise || this.bridgeFolder !== folder) {
-      this.bridgeFolder = folder;
-      this.bridgePromise = Promise.all(["pipeline", "parser", "references", "utils", "settings"].map(
-        (name) => import(new URL(`../${folder}/src/${name}.js`, this.extensionBase).href)
-      )).then(([pipeline, parser, references, utils, config]) => {
-        if (typeof pipeline.generateImageWithRetry !== "function" || typeof parser.applyConfiguredStyleToTag !== "function" || typeof utils.parseImageDataUrl !== "function" || typeof utils.encodeLocalMediaPath !== "function") {
-          throw new Error("Incompatible SillyImages modules");
+    // Prefer our Plus fork. Keep the configured folder and original SillyImages as fallbacks
+    // so older presets do not need to be rewritten by hand.
+    const folders = [...new Set(["Silly-Images-Plus", configuredFolder, "sillyimages"].filter(Boolean))];
+    const enabledFolders = folders.filter((folder) => !disabled.includes(`third-party/${folder}`));
+    if (!enabledFolders.length) throw new SceneError("bridge", "Включи Silly Images Plus (или совместимый SillyImages).");
+    const cacheKey = enabledFolders.join("|");
+    if (!this.bridgePromise || this.bridgeFolder !== cacheKey) {
+      this.bridgeFolder = cacheKey;
+      this.bridgePromise = (async () => {
+        let lastError;
+        for (const folder of enabledFolders) {
+          try {
+            const [pipeline, parser, references, utils, config] = await Promise.all(["pipeline", "parser", "references", "utils", "settings"].map(
+              (name) => import(new URL(`../${folder}/src/${name}.js`, this.extensionBase).href)
+            ));
+            if (typeof pipeline.generateImageWithRetry !== "function" || typeof parser.applyConfiguredStyleToTag !== "function" || typeof utils.parseImageDataUrl !== "function" || typeof utils.encodeLocalMediaPath !== "function") {
+              throw new Error("Incompatible SillyImages modules");
+            }
+            this.loadedBridge = { pipeline, parser, references, utils, config };
+            settings.sillyImagesFolder = folder;
+            return this.loadedBridge;
+          } catch (error) {
+            lastError = error;
+          }
         }
-        this.loadedBridge = { pipeline, parser, references, utils, config };
-        return this.loadedBridge;
-      }).catch(() => {
+        throw lastError || new Error("No compatible SillyImages bridge found");
+      })().catch(() => {
         this.bridgePromise = null;
-        throw new SceneError("bridge", "Не удалось подключить SillyImages. Проверь его установку, версию и название папки.");
+        throw new SceneError("bridge", "Не удалось подключить Silly Images Plus. Проверь, что Plus установлен и включён.");
       });
     }
     return this.bridgePromise;
