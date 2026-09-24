@@ -2,7 +2,7 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.10";
+var VERSION = "0.3.11";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -1504,7 +1504,7 @@ var SceneUI = class {
       const module = await this.videoBridge();
       const result = await module.animateImageInteractive(slot.src, (text) => {
         if (status) status.textContent = `Картинка ${slotIndex + 1}: ${text}`;
-      });
+      }, slot.prompt || "");
       if (!result) { if (status) status.textContent = ""; return; }
 
       // Keep the generated video attached to this exact image slot. Returning
@@ -1564,7 +1564,7 @@ var SceneUI = class {
         .sbl-media-shell{position:relative;display:block;max-width:100%}
         .sbl-media-shell>img,.sbl-media-shell>video{display:block;width:100%;max-width:100%;height:auto}
         .sbl-media-shell>video{background:#000}
-        .sbl-mini-media-tools{position:absolute;z-index:30;top:8px;right:8px;display:flex;gap:5px;padding:5px;border-radius:12px;background:rgba(12,12,14,.72);backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,.32)}
+        .sbl-mini-media-tools{position:absolute;z-index:30;top:8px;right:8px;display:flex;gap:5px;padding:5px;border-radius:12px;background:rgba(12,12,14,.72);backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,.32);opacity:var(--iig-actions-opacity,.8);transition:opacity .15s ease}
         .sbl-mini-media-tools button,.sbl-mini-media-tools a{appearance:none;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;padding:0!important;margin:0!important;border:1px solid rgba(255,255,255,.28)!important;border-radius:9px!important;background:rgba(18,18,22,.88)!important;color:#fff!important;display:grid!important;place-items:center!important;text-decoration:none!important;font-size:17px!important;line-height:1!important;box-shadow:none!important}
         .sbl-mini-media-tools button:hover,.sbl-mini-media-tools a:hover{background:rgba(55,55,65,.96)!important}
         .sbl-mini-media-tools button:disabled{opacity:.42}
