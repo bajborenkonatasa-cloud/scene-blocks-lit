@@ -975,6 +975,25 @@ var SceneUI = class {
     if (!parent) return;
     const section = document.createElement("details");
     section.id = "sbl-settings";
+    const polish = document.createElement("style");
+    polish.textContent = `
+      #sbl-settings .sbl-settings-body{display:grid;gap:12px;padding:12px 4px}
+      #sbl-settings .sbl-settings-body>label{display:grid;gap:6px}
+      #sbl-settings .sbl-row{gap:10px;align-items:stretch}
+      #sbl-settings .sbl-row>*{min-width:0}
+      #sbl-settings .sbl-provider-card,#sbl-settings .sbl-share-box,#sbl-settings .sbl-legacy-tools{border-radius:16px;padding:14px;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 70%,transparent);background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#111) 88%,transparent)}
+      #sbl-settings .sbl-provider-title,#sbl-settings .sbl-share-title{font-size:1.05em;margin-bottom:10px}
+      #sbl-settings button{min-height:42px;border-radius:12px}
+      #sbl-settings select,#sbl-settings input,#sbl-settings textarea{border-radius:11px}
+      .sbl-image-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px}
+      .sbl-image-tools label{display:flex;gap:8px;align-items:center}
+      .sbl-image-tools button,.sbl-image-tools a{min-height:38px;display:inline-flex;align-items:center;justify-content:center}
+      .sbl-selection-status{flex-basis:100%;margin:0;opacity:.8}
+      .sbl-video-preview{flex-basis:100%;display:grid;gap:8px;margin-top:4px}
+      .sbl-video-preview video{width:100%;max-height:78vh;border-radius:14px;background:#000}
+      .sbl-video-preview-actions{display:flex;gap:10px;flex-wrap:wrap}
+      @media(max-width:520px){#sbl-settings .sbl-row{display:grid;grid-template-columns:1fr}.sbl-image-tools>*{width:100%}.sbl-image-tools label{justify-content:space-between}.sbl-image-tools select{flex:1}}
+    `;
     section.innerHTML = `<summary>Мои сцены <small>· ${VERSION}</small></summary>
           <div class="sbl-settings-body">
             <p class="sbl-muted">Картинки и HTML/CSS по выбранному промпту</p>
@@ -1028,6 +1047,7 @@ var SceneUI = class {
             <button type="button" id="sbl-debug">Скачать диагностику</button>
             <p id="sbl-notice" role="status" aria-live="polite"></p>
           </div>`;
+    section.appendChild(polish);
     parent.append(section);
     this.fillSettings();
     const on2 = (id, event, handler) => section.querySelector(`#${id}`).addEventListener(event, handler);
@@ -1339,6 +1359,7 @@ var SceneUI = class {
         else if (button.dataset.action === "cancel-block") this.closeBlockEditor(root);
         else if (button.dataset.action === "stop") this.engine.stop(liveIndex);
         else if (button.dataset.action === "retry-selected") void this.start(liveIndex, `slot-${root.querySelector(".sbl-select-image").value}`);
+        else if (button.dataset.action === "animate-selected") void this.animateSelected(root, liveIndex);
         else void this.start(liveIndex, button.dataset.action);
       });
       const body = mes.querySelector(".mes_text");
@@ -1455,12 +1476,47 @@ var SceneUI = class {
       this.notice("Изменения блока сохранены.");
     }
   }
+  async animateSelected(root, index) {
+    const state = readState(this.getContext().chat[index]);
+    const select = root.querySelector(".sbl-select-image");
+    const slot = state?.plan?.slots?.[Number(select?.value)];
+    if (!slot?.src) { this.notice("Сначала дождись готовой картинки.", true); return; }
+    const tools = root.querySelector(".sbl-image-tools");
+    const status = tools?.querySelector(".sbl-selection-status");
+    const button = tools?.querySelector('[data-action="animate-selected"]');
+    try {
+      if (button) button.disabled = true;
+      if (status) status.textContent = "Открываю Grok Video…";
+      const folder = this.settings().sillyImagesFolder || "Silly-Images-Plus";
+      const module = await import(new URL(`../${folder}/src/xaiVideo.js`, import.meta.url).href);
+      const result = await module.animateImageInteractive(slot.src, (text) => { if (status) status.textContent = text; });
+      if (!result) { if (status) status.textContent = ""; return; }
+      let preview = tools.querySelector(".sbl-video-preview");
+      if (!preview) {
+        preview = document.createElement("div");
+        preview.className = "sbl-video-preview";
+        tools.appendChild(preview);
+      }
+      preview.innerHTML = "";
+      const video = document.createElement("video");
+      video.src = result.url; video.controls = true; video.playsInline = true; video.preload = "metadata";
+      const row = document.createElement("div"); row.className = "sbl-video-preview-actions";
+      const hide = document.createElement("button"); hide.type = "button"; hide.textContent = "🖼️ Вернуться к картинке"; hide.onclick = () => preview.remove();
+      const open = document.createElement("a"); open.href = result.url; open.target = "_blank"; open.rel = "noopener noreferrer"; open.textContent = "Открыть видео";
+      row.append(hide, open); preview.append(video, row);
+      if (status) status.textContent = `Видео готово · ${result.duration}с · ${result.resolution}`;
+      video.play().catch(() => {});
+    } catch (error) {
+      if (status) status.textContent = error?.message || "Не удалось создать видео.";
+      this.notice(error?.message || "Не удалось создать видео через Grok.", true);
+    } finally { if (button) button.disabled = false; }
+  }
   renderTemplate(content, state, job, index) {
     if (content.dataset.plan !== state.id) {
       const oldHost = content.querySelector(".sbl-artifact");
       if (oldHost) this.visibility?.unobserve(oldHost);
       content.dataset.plan = state.id;
-      content.innerHTML = '<div class="sbl-artifact-clip"><div class="sbl-artifact"></div></div><div class="sbl-image-tools"><label>Картинка <select class="sbl-select-image"></select></label><button type="button" data-action="retry-selected">Повторить выбранную</button><a class="sbl-open-image" target="_blank" rel="noopener noreferrer">Открыть картинку</a><p class="sbl-selection-status" role="status"></p></div>';
+      content.innerHTML = '<div class="sbl-artifact-clip"><div class="sbl-artifact"></div></div><div class="sbl-image-tools"><label>Картинка <select class="sbl-select-image"></select></label><button type="button" data-action="retry-selected">🔄 Повторить</button><button type="button" data-action="animate-selected">🎬 Оживить выбранную</button><a class="sbl-open-image" target="_blank" rel="noopener noreferrer">Открыть картинку</a><p class="sbl-selection-status" role="status"></p></div>';
       const select2 = content.querySelector(".sbl-select-image");
       state.plan.slots.forEach((_, slotIndex) => select2.append(new Option(String(slotIndex + 1), String(slotIndex))));
       select2.addEventListener("change", () => {
@@ -1489,7 +1545,8 @@ var SceneUI = class {
     link.hidden = !hasFile;
     if (hasFile) link.href = selected.src;
     else link.removeAttribute("href");
-    tools.querySelector("button").disabled = Boolean(job) || !selected || Boolean(this.getContext().chat[index]?.is_system);
+    tools.querySelector('[data-action="retry-selected"]').disabled = Boolean(job) || !selected || Boolean(this.getContext().chat[index]?.is_system);
+    tools.querySelector('[data-action="animate-selected"]').disabled = Boolean(job) || !hasFile;
     tools.querySelector(".sbl-selection-status").textContent = selected?.error?.message || "";
   }
 };
