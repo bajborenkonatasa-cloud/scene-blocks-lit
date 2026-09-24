@@ -2,7 +2,7 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.9.1";
+var VERSION = "0.3.10";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -985,14 +985,12 @@ var SceneUI = class {
       #sbl-settings .sbl-provider-title,#sbl-settings .sbl-share-title{font-size:1.05em;margin-bottom:10px}
       #sbl-settings button{min-height:42px;border-radius:12px}
       #sbl-settings select,#sbl-settings input,#sbl-settings textarea{border-radius:11px}
-      .sbl-image-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px}
-      .sbl-image-tools label{display:flex;gap:8px;align-items:center}
-      .sbl-image-tools button,.sbl-image-tools a{min-height:38px;display:inline-flex;align-items:center;justify-content:center}
-      .sbl-selection-status{flex-basis:100%;margin:0;opacity:.8}
-      .sbl-video-preview{flex-basis:100%;display:grid;gap:8px;margin-top:4px}
-      .sbl-video-preview video{width:100%;max-height:78vh;border-radius:14px;background:#000}
-      .sbl-video-preview-actions{display:flex;gap:10px;flex-wrap:wrap}
-      @media(max-width:520px){#sbl-settings .sbl-row{display:grid;grid-template-columns:1fr}.sbl-image-tools>*{width:100%}.sbl-image-tools label{justify-content:space-between}.sbl-image-tools select{flex:1}}
+      .sbl-image-tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding:6px 8px;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 55%,transparent);border-radius:12px;background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#111) 82%,transparent)}
+      .sbl-image-tools label{display:flex;gap:6px;align-items:center;font-size:.88em}
+      .sbl-image-tools select{width:auto;min-width:92px;max-width:145px;height:30px;padding:2px 6px}
+      .sbl-image-tools button,.sbl-image-tools a{width:auto!important;min-width:0!important;min-height:30px!important;padding:4px 8px!important;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;font-size:.88em}
+      .sbl-selection-status{flex-basis:100%;margin:0;font-size:.82em;opacity:.8}
+      @media(max-width:520px){#sbl-settings .sbl-row{display:grid;grid-template-columns:1fr}.sbl-image-tools{gap:5px}.sbl-image-tools label{width:auto}.sbl-image-tools select{max-width:120px}}
     `;
     section.innerHTML = `<summary>Мои сцены <small>· ${VERSION}</small></summary>
           <div class="sbl-settings-body">
@@ -1476,75 +1474,179 @@ var SceneUI = class {
       this.notice("Изменения блока сохранены.");
     }
   }
-  async animateSelected(root, index) {
-    const state = readState(this.getContext().chat[index]);
+  async videoBridge() {
+    let module = globalThis.SillyImagesPlusVideo;
+    if (typeof module?.animateImageInteractive === "function") return module;
+    const configured = this.settings().sillyImagesFolder || "";
+    const candidates = [...new Set(["Silly-Images-Plus", "Silly-Images-Plus-main", configured, "sillyimages"].filter(Boolean))];
+    let lastImportError = null;
+    for (const folder of candidates) {
+      try {
+        const candidate = await import(new URL(`../${folder}/src/xaiVideo.js`, import.meta.url).href);
+        if (typeof candidate?.animateImageInteractive === "function") return candidate;
+      } catch (error) {
+        lastImportError = error;
+      }
+    }
+    throw new Error("Не найден модуль Grok Video в Silly Images Plus. Проверь Plus v0.8.2+ и перезапусти SillyTavern.", { cause: lastImportError });
+  }
+  async animateSelected(root, index, forcedSlotIndex = null) {
+    const message = this.getContext().chat[index];
+    const state = readState(message);
     const select = root.querySelector(".sbl-select-image");
-    const slot = state?.plan?.slots?.[Number(select?.value)];
+    const slotIndex = Number.isInteger(forcedSlotIndex) ? forcedSlotIndex : Number(select?.value);
+    const slot = state?.plan?.slots?.[slotIndex];
     if (!slot?.src) { this.notice("Сначала дождись готовой картинки.", true); return; }
     const tools = root.querySelector(".sbl-image-tools");
     const status = tools?.querySelector(".sbl-selection-status");
-    const button = tools?.querySelector('[data-action="animate-selected"]');
     try {
-      if (button) button.disabled = true;
-      if (status) status.textContent = "Открываю Grok Video…";
-      // Prefer the already-loaded Plus video bridge. This avoids depending on
-      // the extension folder name (Android/GitHub installs may rename folders).
-      let module = globalThis.SillyImagesPlusVideo;
-      if (typeof module?.animateImageInteractive !== "function") {
-        const configured = this.settings().sillyImagesFolder || "";
-        const candidates = [...new Set([
-          "Silly-Images-Plus",
-          "Silly-Images-Plus-main",
-          configured,
-          "sillyimages"
-        ].filter(Boolean))];
-        let lastImportError = null;
-        for (const folder of candidates) {
-          try {
-            const candidate = await import(new URL(`../${folder}/src/xaiVideo.js`, import.meta.url).href);
-            if (typeof candidate?.animateImageInteractive === "function") {
-              module = candidate;
-              break;
-            }
-          } catch (error) {
-            lastImportError = error;
-          }
-        }
-        if (typeof module?.animateImageInteractive !== "function") {
-          throw new Error(
-            "Не найден модуль Grok Video в Silly Images Plus. Установи Plus hotfix v0.8.2 и перезапусти SillyTavern.",
-            { cause: lastImportError }
-          );
-        }
-      }
-      const result = await module.animateImageInteractive(slot.src, (text) => { if (status) status.textContent = text; });
+      if (status) status.textContent = `Картинка ${slotIndex + 1}: открываю Grok Video…`;
+      const module = await this.videoBridge();
+      const result = await module.animateImageInteractive(slot.src, (text) => {
+        if (status) status.textContent = `Картинка ${slotIndex + 1}: ${text}`;
+      });
       if (!result) { if (status) status.textContent = ""; return; }
-      let preview = tools.querySelector(".sbl-video-preview");
-      if (!preview) {
-        preview = document.createElement("div");
-        preview.className = "sbl-video-preview";
-        tools.appendChild(preview);
-      }
-      preview.innerHTML = "";
-      const video = document.createElement("video");
-      video.src = result.url; video.controls = true; video.playsInline = true; video.preload = "metadata";
-      const row = document.createElement("div"); row.className = "sbl-video-preview-actions";
-      const hide = document.createElement("button"); hide.type = "button"; hide.textContent = "🖼️ Вернуться к картинке"; hide.onclick = () => preview.remove();
-      const open = document.createElement("a"); open.href = result.url; open.target = "_blank"; open.rel = "noopener noreferrer"; open.textContent = "Открыть видео";
-      row.append(hide, open); preview.append(video, row);
-      if (status) status.textContent = `Видео готово · ${result.duration}с · ${result.resolution}`;
-      video.play().catch(() => {});
+
+      // Keep the generated video attached to this exact image slot. Returning
+      // to the still image no longer destroys it or triggers another paid job.
+      const updated = {
+        ...state,
+        plan: {
+          ...state.plan,
+          slots: state.plan.slots.map((item, i) => i === slotIndex ? {
+            ...item,
+            video: {
+              url: result.url,
+              requestId: result.requestId || "",
+              model: result.model || "",
+              duration: result.duration || 0,
+              resolution: result.resolution || "",
+              visible: true
+            }
+          } : item)
+        }
+      };
+      writeState(message, updated);
+      try { await this.getContext().saveChat?.(); } catch {}
+      this.renderMessage(index);
+      this.notice(`Видео для картинки ${slotIndex + 1} готово. Можно переключаться 🖼️ ↔ ▶️ без новой генерации.`);
     } catch (error) {
       if (status) status.textContent = error?.message || "Не удалось создать видео.";
       this.notice(error?.message || "Не удалось создать видео через Grok.", true);
-    } finally { if (button) button.disabled = false; }
+    }
+  }
+  async setSlotVideoVisible(index, slotIndex, visible) {
+    const message = this.getContext().chat[index];
+    const state = readState(message);
+    const slot = state?.plan?.slots?.[slotIndex];
+    if (!slot?.video?.url) return;
+    const updated = {
+      ...state,
+      plan: {
+        ...state.plan,
+        slots: state.plan.slots.map((item, i) => i === slotIndex ? {
+          ...item,
+          video: { ...item.video, visible: Boolean(visible) }
+        } : item)
+      }
+    };
+    writeState(message, updated);
+    try { await this.getContext().saveChat?.(); } catch {}
+    this.renderMessage(index);
+  }
+  decorateSlotMedia(host, state, job, index) {
+    const shadow = host?.shadowRoot;
+    if (!shadow) return;
+    if (!shadow.querySelector("#sbl-media-controls-style")) {
+      const style = document.createElement("style");
+      style.id = "sbl-media-controls-style";
+      style.textContent = `
+        .sbl-media-shell{position:relative;display:block;max-width:100%}
+        .sbl-media-shell>img,.sbl-media-shell>video{display:block;width:100%;max-width:100%;height:auto}
+        .sbl-media-shell>video{background:#000}
+        .sbl-mini-media-tools{position:absolute;z-index:30;top:8px;right:8px;display:flex;gap:5px;padding:5px;border-radius:12px;background:rgba(12,12,14,.72);backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,.32)}
+        .sbl-mini-media-tools button,.sbl-mini-media-tools a{appearance:none;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;padding:0!important;margin:0!important;border:1px solid rgba(255,255,255,.28)!important;border-radius:9px!important;background:rgba(18,18,22,.88)!important;color:#fff!important;display:grid!important;place-items:center!important;text-decoration:none!important;font-size:17px!important;line-height:1!important;box-shadow:none!important}
+        .sbl-mini-media-tools button:hover,.sbl-mini-media-tools a:hover{background:rgba(55,55,65,.96)!important}
+        .sbl-mini-media-tools button:disabled{opacity:.42}
+        .sbl-mini-busy{position:absolute;left:8px;bottom:8px;z-index:31;max-width:calc(100% - 16px);padding:5px 8px;border-radius:9px;background:rgba(0,0,0,.72);color:#fff;font:12px/1.25 sans-serif}
+      `;
+      shadow.appendChild(style);
+    }
+
+    state.plan.slots.forEach((slot, slotIndex) => {
+      let image = shadow.querySelector(`img[data-sbl-slot="${slotIndex}"]`);
+      if (!image) return;
+      let shell = image.closest(".sbl-media-shell");
+      if (!shell) {
+        shell = document.createElement("div");
+        shell.className = "sbl-media-shell";
+        image.parentNode.insertBefore(shell, image);
+        shell.appendChild(image);
+      }
+      shell.querySelector(".sbl-mini-media-tools")?.remove();
+      shell.querySelector(".sbl-slot-video")?.remove();
+      shell.querySelector(".sbl-mini-busy")?.remove();
+
+      const videoInfo = slot.video;
+      const showVideo = Boolean(videoInfo?.url && videoInfo.visible);
+      image.hidden = showVideo;
+      if (showVideo) {
+        const video = document.createElement("video");
+        video.className = "sbl-slot-video";
+        video.src = videoInfo.url;
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        video.autoplay = true;
+        video.loop = true;
+        shell.insertBefore(video, image.nextSibling);
+        video.play().catch(() => {});
+      }
+
+      const bar = document.createElement("div");
+      bar.className = "sbl-mini-media-tools";
+      const makeButton = (text, title, fn) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = text; b.title = title;
+        b.onclick = (event) => { event.preventDefault(); event.stopPropagation(); fn(b); };
+        return b;
+      };
+      const retry = makeButton("↻", `Повторить картинку ${slotIndex + 1}`, () => this.start(index, `slot-${slotIndex}`));
+      retry.disabled = Boolean(job) || Boolean(this.getContext().chat[index]?.is_system);
+      bar.appendChild(retry);
+
+      if (videoInfo?.url) {
+        const toggle = makeButton(showVideo ? "🖼️" : "▶️", showVideo ? "Вернуться к картинке" : "Показать готовое видео", () => this.setSlotVideoVisible(index, slotIndex, !showVideo));
+        bar.appendChild(toggle);
+      }
+      const animate = makeButton("🎬", videoInfo?.url ? "Создать другое видео" : "Оживить эту картинку", (button) => {
+        button.disabled = true;
+        void this.animateSelected(rootFor(shell), index, slotIndex).finally(() => { button.disabled = false; });
+      });
+      animate.disabled = Boolean(job) || slot.status !== "ready" || !slot.src;
+      bar.appendChild(animate);
+
+      const open = document.createElement("a");
+      open.textContent = "↗";
+      open.title = showVideo ? "Открыть видео" : "Открыть картинку";
+      open.href = showVideo ? videoInfo.url : slot.src;
+      open.target = "_blank"; open.rel = "noopener noreferrer";
+      open.onclick = (event) => event.stopPropagation();
+      bar.appendChild(open);
+      shell.appendChild(bar);
+    });
+
+    function rootFor(node) {
+      const mes = node.getRootNode()?.host?.closest?.(".sbl-output") || host.closest?.(".sbl-output");
+      return mes || document.querySelector(`.mes[mesid="${index}"] .sbl-output`);
+    }
   }
   renderTemplate(content, state, job, index) {
     if (content.dataset.plan !== state.id) {
       const oldHost = content.querySelector(".sbl-artifact");
       if (oldHost) this.visibility?.unobserve(oldHost);
       content.dataset.plan = state.id;
-      content.innerHTML = '<div class="sbl-artifact-clip"><div class="sbl-artifact"></div></div><div class="sbl-image-tools"><label>Картинка <select class="sbl-select-image"></select></label><button type="button" data-action="retry-selected">🔄 Повторить</button><button type="button" data-action="animate-selected">🎬 Оживить выбранную</button><a class="sbl-open-image" target="_blank" rel="noopener noreferrer">Открыть картинку</a><p class="sbl-selection-status" role="status"></p></div>';
+      content.innerHTML = '<div class="sbl-artifact-clip"><div class="sbl-artifact"></div></div><div class="sbl-image-tools"><label>Картинка <select class="sbl-select-image"></select></label><button type="button" data-action="retry-selected" title="Повторить выбранную">↻</button><a class="sbl-open-image" target="_blank" rel="noopener noreferrer" title="Открыть выбранную">↗</a><p class="sbl-selection-status" role="status"></p></div>';
       const select2 = content.querySelector(".sbl-select-image");
       state.plan.slots.forEach((_, slotIndex) => select2.append(new Option(String(slotIndex + 1), String(slotIndex))));
       select2.addEventListener("change", () => {
@@ -1568,13 +1670,13 @@ var SceneUI = class {
       const label = slot.status === "ready" ? "готова" : slot.error ? "ошибка" : "ожидает";
       if (select.options[slotIndex]) select.options[slotIndex].textContent = `${slotIndex + 1} · ${label}`;
     });
+    this.decorateSlotMedia(host, state, job, index);
     const selected = state.plan.slots[Number(select.value)], link = tools.querySelector(".sbl-open-image");
     const hasFile = typeof selected?.src === "string" && /^\/(?!\/)/.test(selected.src);
     link.hidden = !hasFile;
     if (hasFile) link.href = selected.src;
     else link.removeAttribute("href");
     tools.querySelector('[data-action="retry-selected"]').disabled = Boolean(job) || !selected || Boolean(this.getContext().chat[index]?.is_system);
-    tools.querySelector('[data-action="animate-selected"]').disabled = Boolean(job) || !hasFile;
     tools.querySelector(".sbl-selection-status").textContent = selected?.error?.message || "";
   }
 };
