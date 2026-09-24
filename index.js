@@ -2,7 +2,7 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.8";
+var VERSION = "0.3.9.1";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -1487,8 +1487,36 @@ var SceneUI = class {
     try {
       if (button) button.disabled = true;
       if (status) status.textContent = "Открываю Grok Video…";
-      const folder = this.settings().sillyImagesFolder || "Silly-Images-Plus";
-      const module = await import(new URL(`../${folder}/src/xaiVideo.js`, import.meta.url).href);
+      // Prefer the already-loaded Plus video bridge. This avoids depending on
+      // the extension folder name (Android/GitHub installs may rename folders).
+      let module = globalThis.SillyImagesPlusVideo;
+      if (typeof module?.animateImageInteractive !== "function") {
+        const configured = this.settings().sillyImagesFolder || "";
+        const candidates = [...new Set([
+          "Silly-Images-Plus",
+          "Silly-Images-Plus-main",
+          configured,
+          "sillyimages"
+        ].filter(Boolean))];
+        let lastImportError = null;
+        for (const folder of candidates) {
+          try {
+            const candidate = await import(new URL(`../${folder}/src/xaiVideo.js`, import.meta.url).href);
+            if (typeof candidate?.animateImageInteractive === "function") {
+              module = candidate;
+              break;
+            }
+          } catch (error) {
+            lastImportError = error;
+          }
+        }
+        if (typeof module?.animateImageInteractive !== "function") {
+          throw new Error(
+            "Не найден модуль Grok Video в Silly Images Plus. Установи Plus hotfix v0.8.2 и перезапусти SillyTavern.",
+            { cause: lastImportError }
+          );
+        }
+      }
       const result = await module.animateImageInteractive(slot.src, (text) => { if (status) status.textContent = text; });
       if (!result) { if (status) status.textContent = ""; return; }
       let preview = tools.querySelector(".sbl-video-preview");
