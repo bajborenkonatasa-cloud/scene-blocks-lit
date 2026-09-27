@@ -1393,6 +1393,7 @@ var SceneUI = class {
     state.plan.slots.forEach((slot, slotIndex) => {
       const figure = content.querySelector(`[data-slot="${slotIndex}"]`), image = figure.querySelector("img"), link = figure.querySelector("a");
       const hasFile = typeof slot.src === "string" && /^\/(?!\/)/.test(slot.src);
+      image.dataset.sblSlot = String(slotIndex);
       link.hidden = !hasFile;
       if (hasFile && image.getAttribute("src") !== slot.src) {
         image.src = slot.src;
@@ -1401,6 +1402,9 @@ var SceneUI = class {
       figure.querySelector(".sbl-slot-status").textContent = slot.error?.message || (slot.status === "ready" ? "" : "Ожидает завершения");
       figure.querySelector("button").hidden = Boolean(job) || Boolean(message.is_system);
     });
+    // Strict/legacy scene blocks live in the normal DOM rather than the artifact Shadow DOM.
+    // Decorate them too, so ↻ / ▶ / 🎬 / ↗ never disappear depending on layout.
+    this.decorateLightSlotMedia(content, state, job, index);
   }
   openBlockEditor(root, index, state) {
     if (!state?.plan || root.querySelector(".sbl-editor")) return;
@@ -1647,6 +1651,49 @@ var SceneUI = class {
       const mes = node.getRootNode()?.host?.closest?.(".sbl-output") || host.closest?.(".sbl-output");
       return mes || document.querySelector(`.mes[mesid="${index}"] .sbl-output`);
     }
+  }
+  decorateLightSlotMedia(content, state, job, index) {
+    state.plan.slots.forEach((slot, slotIndex) => {
+      const figure = content.querySelector(`[data-slot="${slotIndex}"]`);
+      const image = figure?.querySelector("img");
+      if (!figure || !image) return;
+      const link = image.closest("a");
+      let shell = image.closest(".sbl-light-media-shell");
+      if (!shell) {
+        shell = document.createElement("div");
+        shell.className = "sbl-light-media-shell";
+        shell.style.cssText = "position:relative;display:block;max-width:100%;overflow:visible;isolation:isolate";
+        if (link) { link.parentNode.insertBefore(shell, link); shell.appendChild(link); }
+        else { image.parentNode.insertBefore(shell, image); shell.appendChild(image); }
+      }
+      shell.querySelector(".sbl-mini-media-tools")?.remove();
+      shell.querySelector(".sbl-slot-video")?.remove();
+      const videoInfo = slot.video;
+      const showVideo = Boolean(videoInfo?.url && videoInfo.visible);
+      image.hidden = showVideo;
+      if (showVideo) {
+        const video = document.createElement("video");
+        video.className = "sbl-slot-video"; video.src = videoInfo.url; video.controls = true; video.playsInline = true; video.preload = "metadata"; video.autoplay = true; video.loop = true;
+        video.style.cssText = "display:block;width:100%;max-width:100%;height:auto;background:#000";
+        shell.insertBefore(video, shell.firstChild); video.play().catch(() => {});
+      }
+      const bar = document.createElement("div");
+      bar.className = "sbl-mini-media-tools";
+      bar.style.cssText = "position:absolute!important;z-index:2147483000!important;top:8px!important;right:8px!important;display:flex!important;visibility:visible!important;pointer-events:auto!important;gap:5px!important;padding:5px!important;border-radius:12px!important;background:rgba(12,12,14,.72)!important;backdrop-filter:blur(8px)!important;box-shadow:0 2px 12px rgba(0,0,0,.32)!important;opacity:.9!important";
+      const makeButton = (text, title, fn) => {
+        const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.title = title;
+        b.style.cssText = "width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;padding:0!important;margin:0!important;border:1px solid rgba(255,255,255,.28)!important;border-radius:9px!important;background:rgba(18,18,22,.88)!important;color:#fff!important;display:grid!important;place-items:center!important;font-size:17px!important;line-height:1!important";
+        b.onclick = (event) => { event.preventDefault(); event.stopPropagation(); fn(b); }; return b;
+      };
+      const retry = makeButton("↻", `Повторить картинку ${slotIndex + 1}`, () => this.start(index, `slot-${slotIndex}`));
+      retry.disabled = Boolean(job) || Boolean(this.getContext().chat[index]?.is_system); bar.appendChild(retry);
+      if (videoInfo?.url) bar.appendChild(makeButton(showVideo ? "🖼️" : "▶️", showVideo ? "Вернуться к картинке" : "Показать готовое видео", () => this.setSlotVideoVisible(index, slotIndex, !showVideo)));
+      const animate = makeButton("🎬", videoInfo?.url ? "Создать другое видео" : "Оживить эту картинку", (button) => { button.disabled = true; void this.animateSelected(content.closest(".sbl-output"), index, slotIndex).finally(() => { button.disabled = false; }); });
+      animate.disabled = Boolean(job) || slot.status !== "ready" || !slot.src; bar.appendChild(animate);
+      const open = document.createElement("a"); open.textContent = "↗"; open.title = showVideo ? "Открыть видео" : "Открыть картинку"; open.href = showVideo ? videoInfo.url : slot.src; open.target = "_blank"; open.rel = "noopener noreferrer";
+      open.style.cssText = "width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;border:1px solid rgba(255,255,255,.28)!important;border-radius:9px!important;background:rgba(18,18,22,.88)!important;color:#fff!important;display:grid!important;place-items:center!important;text-decoration:none!important;font-size:17px!important";
+      open.onclick = (event) => event.stopPropagation(); bar.appendChild(open); shell.appendChild(bar);
+    });
   }
   renderTemplate(content, state, job, index) {
     if (content.dataset.plan !== state.id) {
