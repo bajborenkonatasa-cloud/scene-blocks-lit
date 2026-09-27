@@ -2,7 +2,7 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.11";
+var VERSION = "0.3.12";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -1561,10 +1561,10 @@ var SceneUI = class {
       const style = document.createElement("style");
       style.id = "sbl-media-controls-style";
       style.textContent = `
-        .sbl-media-shell{position:relative;display:block;max-width:100%}
+        .sbl-media-shell{position:relative!important;display:block!important;max-width:100%!important;overflow:visible!important;isolation:isolate!important}
         .sbl-media-shell>img,.sbl-media-shell>video{display:block;width:100%;max-width:100%;height:auto}
         .sbl-media-shell>video{background:#000}
-        .sbl-mini-media-tools{position:absolute;z-index:30;top:8px;right:8px;display:flex;gap:5px;padding:5px;border-radius:12px;background:rgba(12,12,14,.72);backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,.32);opacity:var(--iig-actions-opacity,.8);transition:opacity .15s ease}
+        .sbl-mini-media-tools{position:absolute!important;z-index:2147483000!important;top:8px!important;right:8px!important;display:flex!important;visibility:visible!important;pointer-events:auto!important;gap:5px!important;padding:5px!important;margin:0!important;width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;overflow:visible!important;border-radius:12px!important;background:rgba(12,12,14,.72)!important;backdrop-filter:blur(8px)!important;box-shadow:0 2px 12px rgba(0,0,0,.32)!important;opacity:var(--iig-actions-opacity,.8)!important;transform:none!important;transition:opacity .15s ease!important}
         .sbl-mini-media-tools button,.sbl-mini-media-tools a{appearance:none;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;padding:0!important;margin:0!important;border:1px solid rgba(255,255,255,.28)!important;border-radius:9px!important;background:rgba(18,18,22,.88)!important;color:#fff!important;display:grid!important;place-items:center!important;text-decoration:none!important;font-size:17px!important;line-height:1!important;box-shadow:none!important}
         .sbl-mini-media-tools button:hover,.sbl-mini-media-tools a:hover{background:rgba(55,55,65,.96)!important}
         .sbl-mini-media-tools button:disabled{opacity:.42}
@@ -1605,6 +1605,13 @@ var SceneUI = class {
 
       const bar = document.createElement("div");
       bar.className = "sbl-mini-media-tools";
+      bar.dataset.sblMediaTools = "1";
+      // Generated scene HTML may contain broad CSS such as `div { ... !important }`.
+      // Pin the overlay with inline !important declarations so scene styling cannot hide it.
+      for (const [prop, value] of Object.entries({
+        position: "absolute", zIndex: "2147483000", top: "8px", right: "8px",
+        display: "flex", visibility: "visible", pointerEvents: "auto", opacity: "0.9"
+      })) bar.style.setProperty(prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`), value, "important");
       const makeButton = (text, title, fn) => {
         const b = document.createElement("button");
         b.type = "button"; b.textContent = text; b.title = title;
@@ -1671,6 +1678,17 @@ var SceneUI = class {
       if (select.options[slotIndex]) select.options[slotIndex].textContent = `${slotIndex + 1} · ${label}`;
     });
     this.decorateSlotMedia(host, state, job, index);
+    // Some mobile/WebView builds and generated templates restyle/reflow the shadow DOM
+    // just after insertion. Re-assert media controls after those late mutations.
+    [0, 120, 500].forEach((delay) => setTimeout(() => {
+      const liveMessage = this.getContext().chat[index];
+      const liveState = readState(liveMessage);
+      const liveHost = content.querySelector(".sbl-artifact");
+      if (!liveState?.plan || !liveHost?.shadowRoot) return;
+      const expected = liveState.plan.slots.filter((slot) => slot?.src).length;
+      const actual = liveHost.shadowRoot.querySelectorAll(".sbl-mini-media-tools").length;
+      if (actual < expected) this.decorateSlotMedia(liveHost, liveState, this.engine?.jobs?.get?.(index) || null, index);
+    }, delay));
     const selected = state.plan.slots[Number(select.value)], link = tools.querySelector(".sbl-open-image");
     const hasFile = typeof selected?.src === "string" && /^\/(?!\/)/.test(selected.src);
     link.hidden = !hasFile;
