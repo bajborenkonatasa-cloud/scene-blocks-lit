@@ -58,3 +58,20 @@
 #sbl-settings .sbl-legacy-tools > summary {
   cursor: pointer;
 }
+
+
+/* 0.3.14 mobile compact settings */
+#sbl-settings{overflow:hidden;background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#111) 90%,transparent)}
+#sbl-settings>summary{padding:14px 16px}
+#sbl-settings .sbl-settings-body{padding:10px!important;gap:10px!important}
+#sbl-settings .sbl-hero{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 60%,transparent);border-radius:16px;background:linear-gradient(135deg,rgba(84,48,126,.18),rgba(19,95,106,.13))}
+#sbl-settings .sbl-hero>div{display:grid;gap:3px}#sbl-settings .sbl-hero small{opacity:.68}#sbl-settings .sbl-hero-badge{font-size:.75em;padding:4px 9px;border:1px solid rgba(130,159,225,.45);border-radius:999px;opacity:.8}
+#sbl-settings .sbl-panel{padding:0!important;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 58%,transparent)!important;border-radius:15px!important;overflow:hidden;background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#111) 82%,transparent)}
+#sbl-settings .sbl-panel>summary{padding:13px 14px!important;font-weight:700!important;display:flex;align-items:center;gap:8px;list-style:none}
+#sbl-settings .sbl-panel>summary::-webkit-details-marker{display:none}#sbl-settings .sbl-panel>summary::after{content:'›';margin-left:auto;font-size:1.35em;opacity:.7;transform:rotate(90deg);transition:.15s}#sbl-settings .sbl-panel:not([open])>summary::after{transform:rotate(0)}
+#sbl-settings .sbl-panel-body{display:grid;gap:11px;padding:4px 12px 13px;border-top:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 35%,transparent)}
+#sbl-settings .sbl-panel-body>label:first-child{margin-top:8px}
+#sbl-settings .sbl-switch{padding:10px;border-radius:12px;background:rgba(255,255,255,.025)}#sbl-settings .sbl-switch span{display:grid;gap:2px}#sbl-settings .sbl-switch small{opacity:.62;font-size:.8em}
+#sbl-settings .sbl-action-dock{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}#sbl-settings .sbl-action-dock .sbl-primary{font-weight:700}
+#sbl-settings .sbl-provider-card{padding:0!important;border:0!important;background:none!important}.sbl-provider-title{display:none}
+@media(max-width:520px){#sbl-settings .sbl-settings-body{padding:8px!important}#sbl-settings .sbl-panel>summary{padding:12px!important}#sbl-settings .sbl-panel-body{padding:4px 10px 11px}#sbl-settings button{min-height:40px!important}}

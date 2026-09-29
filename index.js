@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.6 · MIT · NovelAI Worker backend added without changing the SillyImages path
+// Scene Blocks Lite 0.3.14 · compact mobile UI + swipe/video slot fixes
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.12";
+var VERSION = "0.3.14";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -994,55 +994,55 @@ var SceneUI = class {
     `;
     section.innerHTML = `<summary>Мои сцены <small>· ${VERSION}</small></summary>
           <div class="sbl-settings-body">
-            <p class="sbl-muted">Картинки и HTML/CSS по выбранному промпту</p>
-            <label>Мои сохранённые промпты<select id="sbl-presetChoice"></select></label>
-            <label>Название промпта<input id="sbl-presetName" type="text" maxlength="100"></label>
-            <div class="sbl-row"><button type="button" id="sbl-new-preset">Новый промпт</button><button type="button" id="sbl-delete-preset">Удалить выбранный</button></div>
-            <label>Формат результата<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → отдельная картинка</option></select></label>
-            <label class="sbl-check"><input id="sbl-auto" type="checkbox"> Автоматически после нового ответа</label>
-            <label>Подключение для подготовки сцены<select id="sbl-profile"></select></label>
-            <div class="sbl-provider-card">
-              <div class="sbl-provider-title"><span>🖼️</span><strong>Источник изображения</strong><span id="sbl-backendBadge" class="sbl-badge"></span></div>
+            <div class="sbl-hero"><div><strong>🎬 Конструктор сцены</strong><small>Промпт → HTML/CSS → иллюстрации</small></div><span class="sbl-hero-badge">Lite</span></div>
+
+            <details class="sbl-panel" open><summary>⚡ Быстрый запуск</summary><div class="sbl-panel-body">
+              <label>Мой промпт<select id="sbl-presetChoice"></select></label>
+              <label>Название<input id="sbl-presetName" type="text" maxlength="100"></label>
+              <div class="sbl-row"><button type="button" id="sbl-new-preset">＋ Новый</button><button type="button" id="sbl-delete-preset">Удалить</button></div>
+              <label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → отдельная картинка</option></select></label>
+              <label>Подготовка сцены<select id="sbl-profile"></select></label>
+              <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Новая сцена создаётся для текущего swipe отдельно.</small></span></label>
+              <div class="sbl-action-dock"><button type="button" id="sbl-run" class="sbl-primary">▶ Создать / продолжить</button><button type="button" id="sbl-stop">■ Стоп</button></div>
+            </div></details>
+
+            <details class="sbl-panel"><summary>🖼️ Источник изображения <span id="sbl-backendBadge" class="sbl-badge"></span></summary><div class="sbl-panel-body">
               <label>Куда отправлять новые картинки<select id="sbl-imageBackend"><option value="sillyimages">🍌 SillyImages · как сейчас</option><option value="novelai_worker">🌙 NovelAI · через Worker</option></select></label>
               <div id="sbl-novelAiFields" class="sbl-provider-fields">
                 <label>NovelAI Worker URL<input id="sbl-novelAiWorkerUrl" type="url" placeholder="https://example.workers.dev/" spellcheck="false"></label>
                 <label>Стиль NovelAI<select id="sbl-novelAiStyleMode"><option value="worker">Стиль добавляет Worker</option><option value="merge">Добавить style из блока к prompt</option></select></label>
-                <div class="sbl-row sbl-provider-actions"><button type="button" id="sbl-test-worker">Проверить Worker</button><span id="sbl-worker-status" class="sbl-worker-status" aria-live="polite"></span></div>
-                <p class="sbl-muted sbl-provider-help">Worker получает prompt и aspect_ratio, обращается к NovelAI и возвращает PNG. Готовый PNG сохраняется в Tavern как и раньше, поэтому старые сцены не зависят от текущего источника.</p>
+                <div class="sbl-row"><button type="button" id="sbl-test-worker">Проверить Worker</button><span id="sbl-worker-status" class="sbl-worker-status" aria-live="polite"></span></div>
               </div>
-            </div>
-            <button type="button" id="sbl-refresh">Обновить списки</button>
-            <label>Промпт из активного набора ExtBlocks<select id="sbl-ext-block"></select></label>
-            <div class="sbl-row"><button type="button" id="sbl-from-ext">Перенести из ExtBlocks</button><button type="button" id="sbl-all-ext">Сохранить весь набор G-блоков</button></div>
-            <p id="sbl-current-prompt" class="sbl-muted"></p>
-            <div class="sbl-share-box">
-              <div class="sbl-share-title">📦 Поделиться промптом</div>
-              <p class="sbl-muted">Можно загрузить как JSON промпта Scene Blocks Lite, так и один generated G-блок старого ExtBlocks. Один файл добавляется как новый сохранённый промпт; существующие промпты не стираются. Профиль модели подбирается по имени, а если совпадения нет — остаётся профиль получателя.</p>
-              <div class="sbl-row"><button type="button" id="sbl-prompt-import">📥 Загрузить промпт JSON</button><button type="button" id="sbl-prompt-export">📤 Скачать выбранный промпт JSON</button></div>
-            </div>
-            <details class="sbl-legacy-tools"><summary>Совместимость и резервная копия</summary>
-              <div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока / полного экспорта</button><button type="button" id="sbl-export">Экспорт всех настроек</button></div>
-            </details>
-            <input id="sbl-file" type="file" accept="application/json,.json" hidden>
-            <input id="sbl-prompt-file" type="file" accept="application/json,.json" hidden>
-            <details><summary>Промпт и шаблон</summary>
-              <label>Творческая инструкция<textarea id="sbl-prompt" rows="10"></textarea></label>
-              <label>HTML-шаблон (в свободном режиме можно оставить пустым)<textarea id="sbl-template" rows="7"></textarea></label>
+            </div></details>
+
+            <details class="sbl-panel"><summary>✍️ Промпт и шаблон</summary><div class="sbl-panel-body">
+              <label>Творческая инструкция<textarea id="sbl-prompt" rows="9"></textarea></label>
+              <label>HTML-шаблон<textarea id="sbl-template" rows="6"></textarea></label>
               <label>Дополнительный контекст<textarea id="sbl-extraContext" rows="4"></textarea></label>
-            </details>
-            <details><summary>Дополнительные настройки</summary>
-              <div class="sbl-grid"><label>Сообщений контекста<input id="sbl-contextCount" type="number" min="1" max="20"></label>
-              <label>Лимит токенов<input id="sbl-maxTokens" type="number" min="512" max="32000"></label>
-              <label>Температура<input id="sbl-temperature" type="number" min="0" max="2" step="0.1"></label>
-              <label>Top P<input id="sbl-topP" type="number" min="0" max="1" step="0.05"></label></div>
-              <label>Максимум картинок в свободном блоке<input id="sbl-maxImages" type="number" min="1" max="20"></label>
+              <button type="button" id="sbl-save">💾 Сохранить промпт</button>
+            </div></details>
+
+            <details class="sbl-panel"><summary>🧩 ExtBlocks и обмен</summary><div class="sbl-panel-body">
+              <button type="button" id="sbl-refresh">↻ Обновить списки</button>
+              <label>Промпт из активного набора ExtBlocks<select id="sbl-ext-block"></select></label>
+              <div class="sbl-row"><button type="button" id="sbl-from-ext">Перенести выбранный</button><button type="button" id="sbl-all-ext">Сохранить весь набор G-блоков</button></div>
+              <p id="sbl-current-prompt" class="sbl-muted"></p>
+              <div class="sbl-share-box"><div class="sbl-share-title">📦 Поделиться промптом</div>
+                <div class="sbl-row"><button type="button" id="sbl-prompt-import">📥 Загрузить JSON</button><button type="button" id="sbl-prompt-export">📤 Скачать JSON</button></div>
+              </div>
+              <details class="sbl-legacy-tools"><summary>Совместимость и резервная копия</summary><div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока / полного экспорта</button><button type="button" id="sbl-export">Экспорт всех настроек</button></div></details>
+            </div></details>
+
+            <details class="sbl-panel"><summary>⚙️ Дополнительно</summary><div class="sbl-panel-body">
+              <div class="sbl-grid"><label>Сообщений контекста<input id="sbl-contextCount" type="number" min="1" max="20"></label><label>Лимит токенов<input id="sbl-maxTokens" type="number" min="512" max="32000"></label><label>Температура<input id="sbl-temperature" type="number" min="0" max="2" step="0.1"></label><label>Top P<input id="sbl-topP" type="number" min="0" max="1" step="0.05"></label></div>
+              <label>Максимум картинок<input id="sbl-maxImages" type="number" min="1" max="20"></label>
               <label>Уровень рассуждения<select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальный</option><option value="low">Низкий</option><option value="medium">Средний</option><option value="high">Высокий</option><option value="max">Максимальный</option></select></label>
-              <label>Папка установленного SillyImages<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label>
+              <label>Папка SillyImages<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label>
               <label class="sbl-check"><input id="sbl-pauseOffscreen" type="checkbox"> Приостанавливать анимации за экраном</label>
-              <p class="sbl-muted">В режиме SillyImages всё работает как раньше: модель, стили и референсы берутся оттуда. В режиме NovelAI Worker генерация идёт через указанную облачную ссылку; SillyImages остаётся установленным для совместимости, локального сохранения и альбома.</p>
-            </details>
-            <div class="sbl-row"><button type="button" id="sbl-save">Сохранить</button><button type="button" id="sbl-run" class="sbl-primary">Создать / продолжить</button><button type="button" id="sbl-stop">Стоп</button></div>
-            <button type="button" id="sbl-debug">Скачать диагностику</button>
+              <button type="button" id="sbl-debug">Скачать диагностику</button>
+            </div></details>
+
+            <input id="sbl-file" type="file" accept="application/json,.json" hidden><input id="sbl-prompt-file" type="file" accept="application/json,.json" hidden>
             <p id="sbl-notice" role="status" aria-live="polite"></p>
           </div>`;
     section.appendChild(polish);
@@ -1508,7 +1508,7 @@ var SceneUI = class {
       const module = await this.videoBridge();
       const result = await module.animateImageInteractive(slot.src, (text) => {
         if (status) status.textContent = `Картинка ${slotIndex + 1}: ${text}`;
-      }, slot.prompt || "");
+      }, slot.instruction?.prompt || "");
       if (!result) { if (status) status.textContent = ""; return; }
 
       // Keep the generated video attached to this exact image slot. Returning
@@ -1829,7 +1829,21 @@ on("MESSAGE_UPDATED", (index) => {
 });
 on("MESSAGE_SWIPED", (index) => {
   engine.checkTargets();
-  ui.renderMessage(Number(index));
+  index = Number(index);
+  ui.renderMessage(index);
+  const context = getContext(), message = context.chat[index];
+  if (!message || message.is_user || message.is_system) return;
+  // Every swipe owns its own Scene Blocks state. If the user lands on a
+  // fresh assistant variant and Auto is enabled, prepare that variant too.
+  if (getSettings(context).auto && !readState(message)) {
+    const expectedChat = chatKey(context), expectedSwipe = swipeId(message);
+    queueMicrotask(() => {
+      const current = getContext();
+      if (chatKey(current) === expectedChat && current.chat[index] === message && swipeId(message) === expectedSwipe && !readState(message)) {
+        void ui.start(index, "continue", true);
+      }
+    });
+  }
 });
 on("MESSAGE_DELETED", () => {
   engine.checkTargets();
