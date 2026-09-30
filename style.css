@@ -75,3 +75,18 @@
 #sbl-settings .sbl-action-dock{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}#sbl-settings .sbl-action-dock .sbl-primary{font-weight:700}
 #sbl-settings .sbl-provider-card{padding:0!important;border:0!important;background:none!important}.sbl-provider-title{display:none}
 @media(max-width:520px){#sbl-settings .sbl-settings-body{padding:8px!important}#sbl-settings .sbl-panel>summary{padding:12px!important}#sbl-settings .sbl-panel-body{padding:4px 10px 11px}#sbl-settings button{min-height:40px!important}}
+
+
+/* 0.4.0 · Ordnung UI */
+#sbl-settings .sbl-section-nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}
+#sbl-settings .sbl-section-nav button{min-width:0!important;min-height:58px!important;padding:7px 3px!important;display:grid;place-items:center;gap:2px;font-size:1.08em;background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#111) 84%,transparent)}
+#sbl-settings .sbl-section-nav small{display:block;font-size:.62em;line-height:1.05;opacity:.78;white-space:nowrap}
+#sbl-settings .sbl-summary-note{margin-left:auto;font-size:.72em;font-weight:500;opacity:.58}
+#sbl-settings .sbl-panel>summary .sbl-summary-note + .sbl-badge{margin-left:0}
+#sbl-settings .sbl-subhead{display:grid;gap:3px;padding:9px 10px;margin-top:8px;border-radius:11px;background:rgba(255,255,255,.025)}
+#sbl-settings .sbl-subhead small{line-height:1.35}
+#sbl-settings .sbl-info{margin:2px 0 0;padding:9px 10px;border-radius:10px;background:rgba(255,255,255,.02);line-height:1.4}
+#sbl-settings .sbl-inner-advanced{padding:0 10px;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 45%,transparent);border-radius:11px}
+#sbl-settings .sbl-inner-advanced>summary{font-weight:650}
+#sbl-settings .sbl-inner-advanced[open]{padding-bottom:9px}
+@media(max-width:420px){#sbl-settings .sbl-section-nav{gap:5px}#sbl-settings .sbl-section-nav button{min-height:54px!important;font-size:1em}#sbl-settings .sbl-section-nav small{font-size:.58em}#sbl-settings .sbl-grid{grid-template-columns:1fr}}

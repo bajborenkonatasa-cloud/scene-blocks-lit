@@ -994,52 +994,62 @@ var SceneUI = class {
     `;
     section.innerHTML = `<summary>Мои сцены <small>· ${VERSION}</small></summary>
           <div class="sbl-settings-body">
-            <div class="sbl-hero"><div><strong>🎬 Конструктор сцены</strong><small>Промпт → HTML/CSS → иллюстрации</small></div><span class="sbl-hero-badge">Lite</span></div>
+            <div class="sbl-hero"><div><strong>🎬 Scene Blocks Lite</strong><small>Сцена → блок → медиа. Всё по полочкам.</small></div><span class="sbl-hero-badge">Lite</span></div>
 
-            <details class="sbl-panel" open><summary>⚡ Быстрый запуск</summary><div class="sbl-panel-body">
+            <nav class="sbl-section-nav" aria-label="Разделы Scene Blocks">
+              <button type="button" data-sbl-open="sbl-panel-start">▶️<small>Запуск</small></button>
+              <button type="button" data-sbl-open="sbl-panel-prompt">✍️<small>Промпт</small></button>
+              <button type="button" data-sbl-open="sbl-panel-media">🖼️<small>Медиа</small></button>
+              <button type="button" data-sbl-open="sbl-panel-library">📦<small>Блоки</small></button>
+              <button type="button" data-sbl-open="sbl-panel-tech">⚙️<small>Техника</small></button>
+            </nav>
+
+            <details class="sbl-panel" id="sbl-panel-start" open><summary>▶️ Запуск сцены <span class="sbl-summary-note">главное</span></summary><div class="sbl-panel-body">
+              <div class="sbl-subhead"><strong>Сохранённый сценарий</strong><small>Выбери промпт и запусти его. Остальное можно не трогать.</small></div>
               <label>Мой промпт<select id="sbl-presetChoice"></select></label>
               <label>Название<input id="sbl-presetName" type="text" maxlength="100"></label>
-              <div class="sbl-row"><button type="button" id="sbl-new-preset">＋ Новый</button><button type="button" id="sbl-delete-preset">Удалить</button></div>
-              <label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → отдельная картинка</option></select></label>
-              <label>Подготовка сцены<select id="sbl-profile"></select></label>
-              <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Новая сцена создаётся для текущего swipe отдельно.</small></span></label>
-              <div class="sbl-action-dock"><button type="button" id="sbl-run" class="sbl-primary">▶ Создать / продолжить</button><button type="button" id="sbl-stop">■ Стоп</button></div>
+              <div class="sbl-row"><button type="button" id="sbl-new-preset">＋ Новый</button><button type="button" id="sbl-delete-preset">🗑️ Удалить</button></div>
+              <div class="sbl-grid"><label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → картинка</option></select></label><label>Подготовка сцены<select id="sbl-profile"></select></label></div>
+              <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Отдельно для текущего swipe.</small></span></label>
+              <div class="sbl-action-dock"><button type="button" id="sbl-run" class="sbl-primary">▶ Создать / продолжить</button><button type="button" id="sbl-stop">■</button></div>
             </div></details>
 
-            <details class="sbl-panel"><summary>🖼️ Источник изображения <span id="sbl-backendBadge" class="sbl-badge"></span></summary><div class="sbl-panel-body">
-              <label>Куда отправлять новые картинки<select id="sbl-imageBackend"><option value="sillyimages">🍌 SillyImages · как сейчас</option><option value="novelai_worker">🌙 NovelAI · через Worker</option></select></label>
+            <details class="sbl-panel" id="sbl-panel-prompt"><summary>✍️ Содержание блока <span class="sbl-summary-note">мозг</span></summary><div class="sbl-panel-body">
+              <div class="sbl-subhead"><strong>Что должна сделать модель</strong><small>Здесь живёт логика конкретного блока.</small></div>
+              <label>Творческая инструкция<textarea id="sbl-prompt" rows="9"></textarea></label>
+              <label>HTML-шаблон<textarea id="sbl-template" rows="6"></textarea></label>
+              <label>Дополнительный контекст<textarea id="sbl-extraContext" rows="4"></textarea></label>
+              <button type="button" id="sbl-save" class="sbl-primary">💾 Сохранить изменения</button>
+            </div></details>
+
+            <details class="sbl-panel" id="sbl-panel-media"><summary>🖼️ Картинки и видео <span id="sbl-backendBadge" class="sbl-badge"></span></summary><div class="sbl-panel-body">
+              <div class="sbl-subhead"><strong>Маршрут изображения</strong><small>Silly Images Plus — обычный путь. Worker оставлен как отдельный совместимый маршрут.</small></div>
+              <label>Куда отправлять новые картинки<select id="sbl-imageBackend"><option value="sillyimages">✨ Silly Images Plus · текущий движок</option><option value="novelai_worker">🌙 NovelAI · через Worker</option></select></label>
               <div id="sbl-novelAiFields" class="sbl-provider-fields">
                 <label>NovelAI Worker URL<input id="sbl-novelAiWorkerUrl" type="url" placeholder="https://example.workers.dev/" spellcheck="false"></label>
                 <label>Стиль NovelAI<select id="sbl-novelAiStyleMode"><option value="worker">Стиль добавляет Worker</option><option value="merge">Добавить style из блока к prompt</option></select></label>
                 <div class="sbl-row"><button type="button" id="sbl-test-worker">Проверить Worker</button><span id="sbl-worker-status" class="sbl-worker-status" aria-live="polite"></span></div>
               </div>
+              <p class="sbl-muted sbl-info">🎬 Оживление готовой картинки остаётся прямо на медиа-карточке, чтобы настройки не превращались в склад кнопок.</p>
             </div></details>
 
-            <details class="sbl-panel"><summary>✍️ Промпт и шаблон</summary><div class="sbl-panel-body">
-              <label>Творческая инструкция<textarea id="sbl-prompt" rows="9"></textarea></label>
-              <label>HTML-шаблон<textarea id="sbl-template" rows="6"></textarea></label>
-              <label>Дополнительный контекст<textarea id="sbl-extraContext" rows="4"></textarea></label>
-              <button type="button" id="sbl-save">💾 Сохранить промпт</button>
-            </div></details>
-
-            <details class="sbl-panel"><summary>🧩 ExtBlocks и обмен</summary><div class="sbl-panel-body">
-              <button type="button" id="sbl-refresh">↻ Обновить списки</button>
+            <details class="sbl-panel" id="sbl-panel-library"><summary>📦 Библиотека и обмен <span class="sbl-summary-note">JSON / ExtBlocks</span></summary><div class="sbl-panel-body">
+              <div class="sbl-subhead"><strong>Мои блоки</strong><small>Импорт, перенос и резервные копии собраны в одном месте.</small></div>
               <label>Промпт из активного набора ExtBlocks<select id="sbl-ext-block"></select></label>
-              <div class="sbl-row"><button type="button" id="sbl-from-ext">Перенести выбранный</button><button type="button" id="sbl-all-ext">Сохранить весь набор G-блоков</button></div>
+              <div class="sbl-row"><button type="button" id="sbl-refresh">↻ Обновить список</button><button type="button" id="sbl-from-ext">＋ Забрать выбранный</button></div>
+              <button type="button" id="sbl-all-ext">📚 Сохранить весь набор G-блоков</button>
               <p id="sbl-current-prompt" class="sbl-muted"></p>
-              <div class="sbl-share-box"><div class="sbl-share-title">📦 Поделиться промптом</div>
+              <div class="sbl-share-box"><div class="sbl-share-title">🤝 Один промпт</div><small>Удобно отправить подруге или перенести между установками.</small>
                 <div class="sbl-row"><button type="button" id="sbl-prompt-import">📥 Загрузить JSON</button><button type="button" id="sbl-prompt-export">📤 Скачать JSON</button></div>
               </div>
-              <details class="sbl-legacy-tools"><summary>Совместимость и резервная копия</summary><div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока / полного экспорта</button><button type="button" id="sbl-export">Экспорт всех настроек</button></div></details>
+              <details class="sbl-legacy-tools"><summary>🧰 Полная резервная копия / старый формат</summary><div class="sbl-row"><button type="button" id="sbl-import">Импорт G-блока / экспорта</button><button type="button" id="sbl-export">Экспорт всех настроек</button></div></details>
             </div></details>
 
-            <details class="sbl-panel"><summary>⚙️ Дополнительно</summary><div class="sbl-panel-body">
+            <details class="sbl-panel" id="sbl-panel-tech"><summary>⚙️ Технические настройки <span class="sbl-summary-note">редко нужны</span></summary><div class="sbl-panel-body">
+              <div class="sbl-subhead"><strong>Контекст и генерация</strong><small>Если всё работает — сюда можно вообще не заходить.</small></div>
               <div class="sbl-grid"><label>Сообщений контекста<input id="sbl-contextCount" type="number" min="1" max="20"></label><label>Лимит токенов<input id="sbl-maxTokens" type="number" min="512" max="32000"></label><label>Температура<input id="sbl-temperature" type="number" min="0" max="2" step="0.1"></label><label>Top P<input id="sbl-topP" type="number" min="0" max="1" step="0.05"></label></div>
-              <label>Максимум картинок<input id="sbl-maxImages" type="number" min="1" max="20"></label>
-              <label>Уровень рассуждения<select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальный</option><option value="low">Низкий</option><option value="medium">Средний</option><option value="high">Высокий</option><option value="max">Максимальный</option></select></label>
-              <label>Папка SillyImages<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label>
-              <label class="sbl-check"><input id="sbl-pauseOffscreen" type="checkbox"> Приостанавливать анимации за экраном</label>
-              <button type="button" id="sbl-debug">Скачать диагностику</button>
+              <div class="sbl-grid"><label>Максимум картинок<input id="sbl-maxImages" type="number" min="1" max="20"></label><label>Рассуждение<select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальное</option><option value="low">Низкое</option><option value="medium">Среднее</option><option value="high">Высокое</option><option value="max">Максимальное</option></select></label></div>
+              <details class="sbl-inner-advanced"><summary>🔧 Совместимость</summary><label>Папка Silly Images Plus<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label><label class="sbl-check"><input id="sbl-pauseOffscreen" type="checkbox"> Приостанавливать анимации за экраном</label><button type="button" id="sbl-debug">Скачать диагностику</button></details>
             </div></details>
 
             <input id="sbl-file" type="file" accept="application/json,.json" hidden><input id="sbl-prompt-file" type="file" accept="application/json,.json" hidden>
@@ -1047,6 +1057,23 @@ var SceneUI = class {
           </div>`;
     section.appendChild(polish);
     parent.append(section);
+
+    // Ordnung: one main panel at a time. Tapping the active nav button closes it.
+    const mainPanels = [...section.querySelectorAll(":scope .sbl-settings-body > .sbl-panel")];
+    const openPanel = (id) => {
+      const target = section.querySelector(`#${id}`);
+      if (!target) return;
+      const wasOpen = target.open;
+      mainPanels.forEach((panel) => { panel.open = false; });
+      target.open = !wasOpen;
+      if (target.open) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    section.querySelectorAll("[data-sbl-open]").forEach((button) => button.addEventListener("click", () => openPanel(button.dataset.sblOpen)));
+    mainPanels.forEach((panel) => panel.addEventListener("toggle", () => {
+      if (!panel.open) return;
+      mainPanels.forEach((other) => { if (other !== panel) other.open = false; });
+    }));
+
     this.fillSettings();
     const on2 = (id, event, handler) => section.querySelector(`#${id}`).addEventListener(event, handler);
     on2("sbl-presetChoice", "change", (event) => {
