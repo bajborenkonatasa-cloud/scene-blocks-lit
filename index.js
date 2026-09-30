@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.5.1 · clean provider prompt + global LLM + compact Ordnung UI
+// Scene Blocks Lite 0.6.0 · clean prompt workspace + independent LLM/media routes
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.5.0";
+var VERSION = "0.6.0";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -1015,22 +1015,27 @@ var SceneUI = class {
             </nav>
 
             <details class="sbl-panel" id="sbl-panel-start" open><summary>▶️ Запуск сцены <span class="sbl-summary-note">главное</span></summary><div class="sbl-panel-body">
-              <div class="sbl-subhead"><strong>Сохранённый сценарий</strong><small>Выбери промпт и запусти его. Остальное можно не трогать.</small></div>
-              <label>Мой промпт<select id="sbl-presetChoice"></select></label>
-              <label>Название<input id="sbl-presetName" type="text" maxlength="100"></label>
-              <div class="sbl-row"><button type="button" id="sbl-new-preset">＋ Новый</button><button type="button" id="sbl-delete-preset">🗑️ Удалить</button></div>
-              <label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → картинка</option></select></label>
-              <div class="sbl-global-model"><div><strong>🧠 Основная LLM</strong><small>Одна для всех промптов. Выбор промпта её больше не меняет.</small></div><select id="sbl-profile"></select></div>
+              <div class="sbl-subhead"><strong>Рабочий стол</strong><small>Три вещи: какой промпт, какая LLM и когда запускать.</small></div>
+              <label class="sbl-main-choice">📚 Промпт<select id="sbl-presetChoice"></select></label>
+              <div class="sbl-global-model"><div><strong>🧠 Основная LLM</strong><small>Одна для обычных блоков. Промпты её не переключают.</small></div><select id="sbl-profile"></select></div>
+              <div class="sbl-route-strip"><span>🎨 Картинки</span><strong id="sbl-routeSummary">Silly Images Plus</strong><small>Маршрут меняется во вкладке «Медиа»</small></div>
               <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Отдельно для текущего swipe.</small></span></label>
               <div class="sbl-action-dock"><button type="button" id="sbl-run" class="sbl-primary">▶ Создать / продолжить</button><button type="button" id="sbl-stop">■</button></div>
             </div></details>
 
-            <details class="sbl-panel" id="sbl-panel-prompt"><summary>✍️ Содержание блока <span class="sbl-summary-note">мозг</span></summary><div class="sbl-panel-body">
-              <div class="sbl-subhead"><strong>Что должна сделать модель</strong><small>Здесь живёт логика конкретного блока.</small></div>
-              <label>Творческая инструкция<textarea id="sbl-prompt" rows="9"></textarea></label>
-              <label>HTML-шаблон<textarea id="sbl-template" rows="6"></textarea></label>
-              <label>Дополнительный контекст<textarea id="sbl-extraContext" rows="4"></textarea></label>
-              <button type="button" id="sbl-save" class="sbl-primary">💾 Сохранить изменения</button>
+            <details class="sbl-panel" id="sbl-panel-prompt"><summary>✍️ Промпты <span class="sbl-summary-note">содержание</span></summary><div class="sbl-panel-body">
+              <div class="sbl-subhead"><strong>Редактор выбранного промпта</strong><small>Промпт = только содержание. LLM и API здесь не хранятся.</small></div>
+              <div class="sbl-prompt-meta">
+                <label>Название<input id="sbl-presetName" type="text" maxlength="100"></label>
+                <label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → картинка</option></select></label>
+              </div>
+              <div class="sbl-row sbl-prompt-actions"><button type="button" id="sbl-new-preset">＋ Новый промпт</button><button type="button" id="sbl-delete-preset">🗑️ Удалить</button></div>
+              <label>🧠 Инструкция<textarea id="sbl-prompt" rows="7"></textarea></label>
+              <details class="sbl-inner-advanced sbl-prompt-extra"><summary>🧩 Шаблон и дополнительный контекст</summary>
+                <label>HTML-шаблон<textarea id="sbl-template" rows="5"></textarea></label>
+                <label>Дополнительный контекст<textarea id="sbl-extraContext" rows="4"></textarea></label>
+              </details>
+              <button type="button" id="sbl-save" class="sbl-primary">💾 Сохранить промпт</button>
             </div></details>
 
             <details class="sbl-panel" id="sbl-panel-media"><summary>🖼️ Картинки и видео <span id="sbl-backendBadge" class="sbl-badge"></span></summary><div class="sbl-panel-body">
@@ -1339,6 +1344,8 @@ var SceneUI = class {
       badge.textContent = settings.imageBackend === "novelai_worker" ? "NovelAI" : "SillyImages";
       badge.dataset.backend = settings.imageBackend;
     }
+    const routeSummary = document.getElementById("sbl-routeSummary");
+    if (routeSummary) routeSummary.textContent = settings.imageBackend === "novelai_worker" ? "NovelAI · Worker" : "Silly Images Plus · текущий движок";
     const status = document.getElementById("sbl-worker-status");
     if (status && settings.imageBackend !== "novelai_worker") {
       status.textContent = "";

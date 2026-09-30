@@ -101,3 +101,19 @@
 #sbl-settings .sbl-nai-writer{margin-top:2px;background:rgba(94,63,135,.055)}
 #sbl-settings .sbl-nai-writer>summary{padding:9px 4px!important;display:flex;align-items:center;gap:6px}
 @media(max-width:420px){#sbl-settings .sbl-global-model{grid-template-columns:1fr;gap:7px}#sbl-settings .sbl-compact-tech>label{grid-template-columns:minmax(105px,.8fr) minmax(0,1.2fr)}}
+
+
+/* 0.6.0 · clean prompt workspace */
+#sbl-settings .sbl-main-choice{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.025)}
+#sbl-settings .sbl-main-choice select{min-width:0}
+#sbl-settings .sbl-route-strip{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 9px;align-items:center;padding:9px 11px;border:1px solid color-mix(in srgb,var(--SmartThemeBorderColor,#777) 42%,transparent);border-radius:12px;background:rgba(255,255,255,.018)}
+#sbl-settings .sbl-route-strip strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sbl-settings .sbl-route-strip small{grid-column:2;opacity:.58;line-height:1.2}
+#sbl-settings .sbl-prompt-meta{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(130px,.65fr);gap:9px}
+#sbl-settings .sbl-prompt-meta label{display:grid;gap:5px}
+#sbl-settings .sbl-prompt-actions button:first-child{flex:1.5 1 160px}
+#sbl-settings .sbl-prompt-actions button:last-child{flex:.7 1 100px}
+#sbl-settings .sbl-prompt-extra{background:rgba(255,255,255,.018)}
+#sbl-settings .sbl-prompt-extra label{display:grid;gap:5px;margin-top:9px}
+#sbl-settings #sbl-prompt{min-height:150px}
+@media(max-width:420px){#sbl-settings .sbl-prompt-meta{grid-template-columns:1fr}#sbl-settings .sbl-route-strip{grid-template-columns:auto minmax(0,1fr)}}
