@@ -1,4 +1,4 @@
-// Scene Blocks Lite 0.5.0 · independent prompts + global LLM + compact Ordnung UI
+// Scene Blocks Lite 0.5.1 · clean provider prompt + global LLM + compact Ordnung UI
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
@@ -819,16 +819,29 @@ Character: {{char}}. User persona: {{user}}.`) },
     assertSignal(signal);
     if (!isLive(token, this.getContext(), token.epoch)) throw new DOMException("Stopped", "AbortError");
     const tag = { ...instruction };
-    bridge.parser.applyConfiguredStyleToTag(tag, bridge.config.getSettings());
-    return bounded((deadlineSignal) => bridge.pipeline.generateImageWithRetry(tag.prompt, tag.style, () => {
-    }, {
-      aspectRatio: instruction.aspect_ratio,
-      imageSize: instruction.image_size,
-      quality: instruction.quality,
-      preset: instruction.preset,
-      messageId: token.index,
-      signal: deadlineSignal
-    }), signal);
+    const sipSettings = bridge.config.getSettings();
+    bridge.parser.applyConfiguredStyleToTag(tag, sipSettings);
+    // Scene Blocks already compiles character appearance into the scene prompt.
+    // Silly Images Plus/Naistera may append its raw "Character descriptions" block
+    // directly to the image-provider prompt. That is useful as LLM context, but an
+    // image model can literally draw the dossier/text. Suppress only that final
+    // provider append for this Scene Blocks request; keep the library/references intact.
+    const previousDescriptionMode = sipSettings?.naisteraCharacterDescriptionsMode;
+    const shouldSuppressRawDescriptions = sipSettings?.apiType === "naistera";
+    if (shouldSuppressRawDescriptions) sipSettings.naisteraCharacterDescriptionsMode = "none";
+    try {
+      return await bounded((deadlineSignal) => bridge.pipeline.generateImageWithRetry(tag.prompt, tag.style, () => {
+      }, {
+        aspectRatio: instruction.aspect_ratio,
+        imageSize: instruction.image_size,
+        quality: instruction.quality,
+        preset: instruction.preset,
+        messageId: token.index,
+        signal: deadlineSignal
+      }), signal);
+    } finally {
+      if (shouldSuppressRawDescriptions) sipSettings.naisteraCharacterDescriptionsMode = previousDescriptionMode;
+    }
   }
   workerUrl(settings, { ping = false } = {}) {
     const raw = String(settings.novelAiWorkerUrl || "").trim();
