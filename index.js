@@ -1,8 +1,8 @@
-// Scene Blocks Lite 0.3.14 · compact mobile UI + swipe/video slot fixes
+// Scene Blocks Lite 0.5.0 · independent prompts + global LLM + compact Ordnung UI
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.3.14";
+var VERSION = "0.5.0";
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -19,6 +19,8 @@ var STARTER_TEMPLATE = `<comicss>
 var DEFAULTS = Object.freeze({
   auto: false,
   profileId: "",
+  novelAiWriterProfileId: "",
+  novelAiWriterEnabled: false,
   prompt: STARTER_PROMPT,
   template: STARTER_TEMPLATE,
   extraContext: "",
@@ -40,10 +42,10 @@ var DEFAULTS = Object.freeze({
 var numberIn = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback;
 function normalizeFields(raw = {}) {
   const result = { ...DEFAULTS };
-  for (const key of ["profileId", "prompt", "template", "extraContext", "sillyImagesFolder", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "presetName"]) {
+  for (const key of ["profileId", "novelAiWriterProfileId", "prompt", "template", "extraContext", "sillyImagesFolder", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "presetName"]) {
     if (typeof raw[key] === "string") result[key] = raw[key];
   }
-  for (const key of ["auto", "pauseOffscreen"]) {
+  for (const key of ["auto", "pauseOffscreen", "novelAiWriterEnabled"]) {
     if (typeof raw[key] === "boolean") result[key] = raw[key];
   }
   result.contextCount = Math.round(numberIn(raw.contextCount, 1, 1, 20));
@@ -57,7 +59,7 @@ function normalizeFields(raw = {}) {
   result.maxImages = Math.round(numberIn(raw.maxImages, 8, 1, 20));
   return result;
 }
-var PRESET_FIELDS = ["profileId", "prompt", "template", "extraContext", "contextCount", "maxTokens", "temperature", "topP", "reasoning", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "outputMode", "maxImages"];
+var PRESET_FIELDS = ["prompt", "template", "extraContext", "importedName", "outputMode"];
 function snapshot(raw) {
   const settings = normalizeFields(raw);
   return Object.fromEntries(PRESET_FIELDS.map((key) => [key, settings[key]]));
@@ -119,26 +121,21 @@ function makePromptExport(settings, context) {
   const normalized = normalizeSettings(settings);
   const active = normalized.presets.find((item) => item.id === normalized.activePresetId) || normalized.presets[0];
   if (!active) throw new Error("Нет выбранного промпта для экспорта.");
-  const profile = (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === active.settings.profileId);
   return {
     kind: `${KEY}_prompt`,
     version: VERSION,
     name: active.name,
-    profileName: profile?.name || "",
-    settings: { ...active.settings, profileId: "" }
+    settings: { ...active.settings }
   };
 }
 function importPromptExport(raw, current, context) {
   if (!raw || raw.kind !== `${KEY}_prompt` || !raw.settings || typeof raw.settings.prompt !== "string") {
     throw new Error("Это не файл промпта Scene Blocks Lite.");
   }
-  const profiles = context.extensionSettings.connectionManager?.profiles || [];
-  const currentProfileId = current.profileId || "";
-  const matched = raw.profileName ? profiles.find((item) => item.name === raw.profileName) : null;
   return {
     ...current,
     ...raw.settings,
-    profileId: matched?.id || currentProfileId,
+    profileId: current.profileId || "",
     presetName: String(raw.name || "Импортированный промпт").slice(0, 100),
     importedName: "",
     auto: false
@@ -163,8 +160,6 @@ function importBlock(raw, current, context) {
   const last = (raw.context || []).find((item) => !item.disabled && item.type === "last_messages");
   const extra = (raw.context || []).filter((item) => !item.disabled && item.type === "text").map((item) => item.text || "").join("\n\n");
   const preset = context.extensionSettings.ExtBlocks?.api_presets?.[raw.api_preset];
-  const profiles = context.extensionSettings.connectionManager?.profiles || [];
-  const matches = profiles.filter((profile) => profile.name === (preset?.connection_profile ?? preset?.connection_profile_name));
   return normalizeSettings({
     ...current,
     auto: false,
@@ -176,11 +171,11 @@ function importBlock(raw, current, context) {
     presetName: raw.name || "Импортированный промпт",
     outputMode: "template",
     maxImages: DEFAULTS.maxImages,
-    profileId: matches.length === 1 ? matches[0].id : current.profileId,
-    maxTokens: preset?.max_tokens ?? current.maxTokens,
-    temperature: preset?.temperature ?? current.temperature,
-    topP: preset?.top_p ?? current.topP,
-    reasoning: preset?.reasoning_effort ?? current.reasoning,
+    profileId: current.profileId,
+    maxTokens: current.maxTokens,
+    temperature: current.temperature,
+    topP: current.topP,
+    reasoning: current.reasoning,
     imageBackend: "sillyimages",
     novelAiWorkerUrl: "",
     novelAiStyleMode: "worker"
@@ -703,7 +698,8 @@ var TavernAdapters = class {
     return this.bridgePromise;
   }
   async prepare(settings, token, signal) {
-    const profile = this.getContext().extensionSettings.connectionManager?.profiles?.find((p) => p.id === settings.profileId);
+    const effectiveProfileId = settings.imageBackend === "novelai_worker" && settings.novelAiWriterEnabled && settings.novelAiWriterProfileId ? settings.novelAiWriterProfileId : settings.profileId;
+    const profile = this.getContext().extensionSettings.connectionManager?.profiles?.find((p) => p.id === effectiveProfileId);
     const entry = {
       at: (/* @__PURE__ */ new Date()).toISOString(),
       api: profile?.api || "",
@@ -757,8 +753,9 @@ var TavernAdapters = class {
     const context = this.getContext();
     if (!isLive(token, context, token.epoch)) throw new DOMException("Stopped", "AbortError");
     const request = context.ConnectionManagerRequestService;
-    const profile = (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === settings.profileId);
-    if (!profile) throw new SceneError("profile", "Выбери профиль подключения для подготовки сцены.");
+    const effectiveProfileId = settings.imageBackend === "novelai_worker" && settings.novelAiWriterEnabled && settings.novelAiWriterProfileId ? settings.novelAiWriterProfileId : settings.profileId;
+    const profile = (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === effectiveProfileId);
+    if (!profile) throw new SceneError("profile", "Выбери основную LLM для подготовки сцены.");
     if (!settings.prompt.trim()) throw new SceneError("prompt", "Добавь промпт сцены в настройках.");
     const substitute = (text) => context.substituteParams(String(text || ""));
     const conversation = context.chat.slice(0, token.index + 1).filter((item) => !item.is_system).slice(-settings.contextCount).map((item) => ({ role: item.is_user ? "user" : "assistant", content: item.mes || "" }));
@@ -784,7 +781,7 @@ Character: {{char}}. User persona: {{user}}.`) },
       entry.transport = "native_text_completion";
       entry.stage = "text_request";
       result = await bounded((deadlineSignal) => request.sendRequest(
-        settings.profileId,
+        effectiveProfileId,
         messages,
         settings.maxTokens,
         { stream: false, signal: deadlineSignal, extractData: true, includePreset: true, includeInstruct: true },
@@ -1009,7 +1006,8 @@ var SceneUI = class {
               <label>Мой промпт<select id="sbl-presetChoice"></select></label>
               <label>Название<input id="sbl-presetName" type="text" maxlength="100"></label>
               <div class="sbl-row"><button type="button" id="sbl-new-preset">＋ Новый</button><button type="button" id="sbl-delete-preset">🗑️ Удалить</button></div>
-              <div class="sbl-grid"><label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → картинка</option></select></label><label>Подготовка сцены<select id="sbl-profile"></select></label></div>
+              <label>Формат<select id="sbl-outputMode"><option value="template">Как в промпте</option><option value="strict">Комикс → HTML/CSS → картинка</option></select></label>
+              <div class="sbl-global-model"><div><strong>🧠 Основная LLM</strong><small>Одна для всех промптов. Выбор промпта её больше не меняет.</small></div><select id="sbl-profile"></select></div>
               <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Отдельно для текущего swipe.</small></span></label>
               <div class="sbl-action-dock"><button type="button" id="sbl-run" class="sbl-primary">▶ Создать / продолжить</button><button type="button" id="sbl-stop">■</button></div>
             </div></details>
@@ -1030,6 +1028,11 @@ var SceneUI = class {
                 <label>Стиль NovelAI<select id="sbl-novelAiStyleMode"><option value="worker">Стиль добавляет Worker</option><option value="merge">Добавить style из блока к prompt</option></select></label>
                 <div class="sbl-row"><button type="button" id="sbl-test-worker">Проверить Worker</button><span id="sbl-worker-status" class="sbl-worker-status" aria-live="polite"></span></div>
               </div>
+              <details class="sbl-inner-advanced sbl-nai-writer"><summary>🌙 NovelAI Prompt Writer <span class="sbl-summary-note">отдельная LLM</span></summary>
+                <label class="sbl-check sbl-switch"><input id="sbl-novelAiWriterEnabled" type="checkbox"> <span><strong>Отдельный писатель для NovelAI</strong><small>Не влияет на Banana / Grok / GPT и обычные промпты.</small></span></label>
+                <label>Профиль LLM для NovelAI<select id="sbl-novelAiWriterProfileId"></select></label>
+                <p class="sbl-muted">Эта настройка подготовлена отдельно от библиотеки промптов. Промпт больше никогда не переключает профиль сам.</p>
+              </details>
               <p class="sbl-muted sbl-info">🎬 Оживление готовой картинки остаётся прямо на медиа-карточке, чтобы настройки не превращались в склад кнопок.</p>
             </div></details>
 
@@ -1047,8 +1050,14 @@ var SceneUI = class {
 
             <details class="sbl-panel" id="sbl-panel-tech"><summary>⚙️ Технические настройки <span class="sbl-summary-note">редко нужны</span></summary><div class="sbl-panel-body">
               <div class="sbl-subhead"><strong>Контекст и генерация</strong><small>Если всё работает — сюда можно вообще не заходить.</small></div>
-              <div class="sbl-grid"><label>Сообщений контекста<input id="sbl-contextCount" type="number" min="1" max="20"></label><label>Лимит токенов<input id="sbl-maxTokens" type="number" min="512" max="32000"></label><label>Температура<input id="sbl-temperature" type="number" min="0" max="2" step="0.1"></label><label>Top P<input id="sbl-topP" type="number" min="0" max="1" step="0.05"></label></div>
-              <div class="sbl-grid"><label>Максимум картинок<input id="sbl-maxImages" type="number" min="1" max="20"></label><label>Рассуждение<select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальное</option><option value="low">Низкое</option><option value="medium">Среднее</option><option value="high">Высокое</option><option value="max">Максимальное</option></select></label></div>
+              <div class="sbl-compact-tech">
+                <label><span>💬 Контекст</span><input id="sbl-contextCount" type="number" min="1" max="20"></label>
+                <label><span>🖼️ Макс. картинок</span><input id="sbl-maxImages" type="number" min="1" max="20"></label>
+                <label><span>🧠 Рассуждение</span><select id="sbl-reasoning"><option value="auto">Из профиля</option><option value="min">Минимальное</option><option value="low">Низкое</option><option value="medium">Среднее</option><option value="high">Высокое</option><option value="max">Максимальное</option></select></label>
+              </div>
+              <details class="sbl-inner-advanced"><summary>🎛️ Тонкая настройка модели</summary>
+                <div class="sbl-compact-tech"><label><span>Лимит токенов</span><input id="sbl-maxTokens" type="number" min="512" max="32000"></label><label><span>Температура</span><input id="sbl-temperature" type="number" min="0" max="2" step="0.1"></label><label><span>Top P</span><input id="sbl-topP" type="number" min="0" max="1" step="0.05"></label></div>
+              </details>
               <details class="sbl-inner-advanced"><summary>🔧 Совместимость</summary><label>Папка Silly Images Plus<input id="sbl-sillyImagesFolder" type="text" spellcheck="false"></label><label class="sbl-check"><input id="sbl-pauseOffscreen" type="checkbox"> Приостанавливать анимации за экраном</label><button type="button" id="sbl-debug">Скачать диагностику</button></details>
             </div></details>
 
@@ -1231,7 +1240,7 @@ var SceneUI = class {
     settings.auto = false;
     this.store(settings);
     this.fillSettings();
-    this.notice(`${sourceLabel} импортирован в «Мои сохранённые промпты». Проверь профиль подготовки сцены, источник картинки и нажми «Сохранить».`);
+    this.notice(`${sourceLabel} импортирован в «Мои сохранённые промпты». Проверь промпт и нажми «Сохранить». Основная LLM остаётся твоей текущей.`);
   }
   acceptImport(raw) {
     if (raw?.kind === `${KEY}_prompt`) {
@@ -1254,7 +1263,7 @@ var SceneUI = class {
     settings.auto = false;
     this.store(settings);
     this.fillSettings();
-    this.notice("Промпт сохранён в новом расширении. Проверь формат, подключение и выключи старый G-блок перед запуском.");
+    this.notice("Промпт сохранён в новом расширении. Промпт перенесён без привязки к старой модели. Выключи старый G-блок перед запуском.");
   }
   download(name, value) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
@@ -1265,13 +1274,18 @@ var SceneUI = class {
     setTimeout(() => URL.revokeObjectURL(url), 1e3);
   }
   fillProfiles() {
-    const select = document.getElementById("sbl-profile");
-    const current = select.value || this.settings().profileId;
-    select.replaceChildren(new Option("— Выбери профиль —", ""));
-    for (const profile of this.getContext().extensionSettings.connectionManager?.profiles || []) {
-      select.append(new Option(profile.name, profile.id));
-    }
-    select.value = current;
+    const settings = this.settings();
+    const profiles = this.getContext().extensionSettings.connectionManager?.profiles || [];
+    const fill = (id, current, emptyLabel) => {
+      const select = document.getElementById(id);
+      if (!select) return;
+      const keep = select.value || current || "";
+      select.replaceChildren(new Option(emptyLabel, ""));
+      for (const profile of profiles) select.append(new Option(profile.name, profile.id));
+      select.value = keep;
+    };
+    fill("sbl-profile", settings.profileId, "— Выбери основную LLM —");
+    fill("sbl-novelAiWriterProfileId", settings.novelAiWriterProfileId, "— Использовать основную LLM —");
   }
   fillExtBlocks() {
     const context = this.getContext(), ext = context.extensionSettings.ExtBlocks;
@@ -1301,7 +1315,7 @@ var SceneUI = class {
     this.fillSavedPresets();
     this.updateProviderUI();
     const backendName = settings.imageBackend === "novelai_worker" ? "NovelAI Worker" : "SillyImages";
-    document.getElementById("sbl-current-prompt").textContent = `Текущий промпт: ${settings.presetName} · ${backendName}. За один запуск используется только он.`;
+    document.getElementById("sbl-current-prompt").textContent = `Промпт: ${settings.presetName} · LLM выбирается отдельно · ${backendName}.`;
   }
   updateProviderUI() {
     const settings = this.settings();
