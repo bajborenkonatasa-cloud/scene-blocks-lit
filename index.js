@@ -1540,20 +1540,43 @@ var SceneUI = class {
     }
   }
   async videoBridge() {
-    let module = globalThis.SillyImagesPlusVideo;
-    if (typeof module?.animateImageInteractive === "function") return module;
-    const configured = this.settings().sillyImagesFolder || "";
-    const candidates = [...new Set(["Silly-Images-Plus", "Silly-Images-Plus-main", configured, "sillyimages"].filter(Boolean))];
-    let lastImportError = null;
-    for (const folder of candidates) {
+    // Prefer the already loaded Silly Images Plus module. This works even if the
+    // user renamed its extension folder.
+    const bridge = globalThis.SillyImagesPlusVideo;
+    if (typeof bridge?.animateImageInteractive === "function") return bridge;
+
+    const configured = String(this.settings().sillyImagesFolder || "").trim();
+    const candidates = new Set([configured, "Silly-Images-Plus", "Silly-Images-Plus-main", "sillyimages"].filter(Boolean));
+
+    // Discover the *actual* extension directory from loaded browser resources.
+    // This avoids guessing its installation folder in Termux.
+    const resourceUrls = [
+      ...Array.from(document.querySelectorAll('script[src], link[href]'), el => el.src || el.href),
+      ...((typeof performance !== 'undefined' && performance.getEntriesByType) ? performance.getEntriesByType('resource').map(x => x.name) : []),
+    ];
+    for (const raw of resourceUrls) {
       try {
-        const candidate = await import(new URL(`../${folder}/src/xaiVideo.js`, import.meta.url).href);
+        const url = new URL(raw, location.href);
+        const match = url.pathname.match(/\/scripts\/extensions\/third-party\/([^/]+)\/(?:src\/)?(?:index|imageActions|xaiVideo)\.js(?:$|\/)/i);
+        if (match && /image|plus|silly/i.test(match[1])) candidates.add(decodeURIComponent(match[1]));
+      } catch { /* ignore malformed browser resource URLs */ }
+    }
+
+    const failures = [];
+    for (const folder of candidates) {
+      if (!/^[a-z0-9_. -]+$/i.test(folder) || folder === '.' || folder === '..') continue;
+      const moduleUrl = new URL(`../${encodeURIComponent(folder)}/src/xaiVideo.js`, import.meta.url).href;
+      try {
+        const candidate = await import(moduleUrl);
         if (typeof candidate?.animateImageInteractive === "function") return candidate;
+        failures.push(`${folder}: нет экспорта animateImageInteractive`);
       } catch (error) {
-        lastImportError = error;
+        failures.push(`${folder}: ${error?.message || String(error)}`);
       }
     }
-    throw new Error("Не найден модуль Grok Video в Silly Images Plus. Проверь Plus v0.8.2+ и перезапусти SillyTavern.", { cause: lastImportError });
+    const details = failures.slice(0, 5).join(' | ');
+    console.error('[Scene Blocks Lite] Video bridge unavailable', { configured, candidates: [...candidates], failures });
+    throw new Error(`Не удалось подключить видеомодуль Silly Images Plus. Проверь название папки расширения и обнови страницу. Причина: ${details || 'модуль не загружен'}`);
   }
   async animateSelected(root, index, forcedSlotIndex = null) {
     const message = this.getContext().chat[index];
