@@ -18,6 +18,7 @@ var STARTER_TEMPLATE = `<comicss>
 </comicss>`;
 var DEFAULTS = Object.freeze({
   auto: false,
+  userSceneButton: true,
   profileId: "",
   novelAiWriterProfileId: "",
   novelAiWriterEnabled: false,
@@ -45,7 +46,7 @@ function normalizeFields(raw = {}) {
   for (const key of ["profileId", "novelAiWriterProfileId", "prompt", "template", "extraContext", "sillyImagesFolder", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "presetName"]) {
     if (typeof raw[key] === "string") result[key] = raw[key];
   }
-  for (const key of ["auto", "pauseOffscreen", "novelAiWriterEnabled"]) {
+  for (const key of ["auto", "pauseOffscreen", "novelAiWriterEnabled", "userSceneButton"]) {
     if (typeof raw[key] === "boolean") result[key] = raw[key];
   }
   result.contextCount = Math.round(numberIn(raw.contextCount, 1, 1, 20));
@@ -239,8 +240,8 @@ function writeState(message, state) {
 }
 function capture(context, index, epoch) {
   const message = context.chat[index];
-  if (!message || message.is_user || message.is_system || !message.mes?.trim() || ["...", "…"].includes(message.mes.trim())) {
-    throw new SceneError("message", "Выбери законченный ответ персонажа.");
+  if (!message || message.is_system || !message.mes?.trim() || ["...", "…"].includes(message.mes.trim())) {
+    throw new SceneError("message", "Выбери законченное сообщение для сцены.");
   }
   return {
     index,
@@ -1019,6 +1020,7 @@ var SceneUI = class {
               <label class="sbl-main-choice">📚 Промпт<select id="sbl-presetChoice"></select></label>
               <div class="sbl-global-model"><div><strong>🧠 Основная LLM</strong><small>Одна для обычных блоков. Промпты её не переключают.</small></div><select id="sbl-profile"></select></div>
               <div class="sbl-route-strip"><span>🎨 Картинки</span><strong id="sbl-routeSummary">Silly Images Plus</strong><small>Маршрут меняется во вкладке «Медиа»</small></div>
+              <label class="sbl-check sbl-switch"><input id="sbl-userSceneButton" type="checkbox"> <span><strong>Кнопка «Сцена» на моих сообщениях</strong><small>Ручная генерация по своему сообщению, отдельно от ответов персонажа.</small></span></label>
               <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Отдельно для текущего swipe.</small></span></label>
               <div class="sbl-action-dock"><button type="button" id="sbl-run" class="sbl-primary">▶ Создать / продолжить</button><button type="button" id="sbl-stop">■</button></div>
             </div></details>
@@ -1139,6 +1141,7 @@ var SceneUI = class {
       this.notice("Настройки сохранены.");
     });
     on2("sbl-auto", "change", () => this.readInputs());
+    on2("sbl-userSceneButton", "change", () => { this.readInputs(); this.renderAll(); });
     on2("sbl-profile", "change", () => this.readInputs());
     on2("sbl-imageBackend", "change", () => {
       this.readInputs();
@@ -1375,7 +1378,11 @@ var SceneUI = class {
   renderMessage(index) {
     const message = this.getContext().chat[index];
     const mes = document.querySelector(`#chat .mes[mesid="${index}"]`);
-    if (!mes || !message || message.is_user) return;
+    if (!mes || !message) return;
+    if (message.is_user && !this.settings().userSceneButton) {
+      mes.querySelector(".sbl-open")?.remove();
+      return;
+    }
     const state = readState(message), job = this.engine.active(index);
     if (message.is_system && !state?.plan) return;
     let action = mes.querySelector(".sbl-open");
@@ -1906,6 +1913,12 @@ on("CHARACTER_MESSAGE_RENDERED", (index) => {
       if (chatKey(current) === expectedChat && current.chat[index] === message && swipeId(message) === expectedSwipe) void ui.start(index, "continue", true);
     });
   }
+});
+on("USER_MESSAGE_RENDERED", (index) => {
+  ui.renderMessage(Number(index));
+});
+on("MESSAGE_SENT", (index) => {
+  ui.renderMessage(Number(index));
 });
 on("MESSAGE_UPDATED", (index) => {
   engine.checkTargets();
