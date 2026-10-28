@@ -2,7 +2,26 @@
 
 // scene-blocks-lite/src/config.js
 var KEY = "scene_blocks_lite";
-var VERSION = "0.6.0";
+var VERSION = "0.6.1";
+var DIRECT_STORE_KEY = "scene_blocks_lite_direct_profiles_v1";
+function directProfiles() { try { const v = JSON.parse(localStorage.getItem(DIRECT_STORE_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } }
+function directProfile(settings) { return directProfiles().find(p => p.id === settings.directProfileId); }
+async function requestDirect(settings, messages, signal, entry) {
+  const p = directProfile(settings);
+  if (!p || !p.url || !p.model || !p.key) throw new SceneError("profile", "Заполни URL, модель и API-ключ и нажми «Сохранить подключение».");
+  const url = p.url.replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(url)) throw new SceneError("profile", "Для прямого подключения нужен HTTPS URL.");
+  const endpoint = /\/chat\/completions$/i.test(url) ? url : url + (/\/v1$/i.test(url) ? "" : "/v1") + "/chat/completions";
+  entry.transport = "direct_browser_openai_compatible"; entry.stage = "text_request";
+  let response;
+  try { response = await fetch(endpoint, {method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer " + p.key},body:JSON.stringify({model:p.model,messages,stream:false,max_tokens:settings.maxTokens,temperature:settings.temperature,top_p:settings.topP}),signal}); }
+  catch(e) { throw new SceneError("connection", "Прямой запрос не прошёл. Возможно, API запрещает CORS из браузера. Проверь URL или используй профиль SillyTavern."); }
+  entry.httpStatus = response.status;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new SceneError("provider", "API вернул HTTP " + response.status + ": " + String(data?.error?.message || "Ошибка подключения").slice(0,180));
+  return responseText(data);
+}
+
 var STARTER_PROMPT = `Illustrate the current roleplay scene as a cinematic digital manhwa.
 Return all three parts in this exact order on EVERY turn:
 1. One vertical comic image: 2 to 4 consecutive moments with organic transitions, detailed backgrounds, expressive faces, coherent poses, lighting and camera angles. Include 1 or 2 small macro insets of objects actually present: hands, food, flowers or meaningful props. These are parts of the SAME comic image.
@@ -20,6 +39,8 @@ var DEFAULTS = Object.freeze({
   auto: false,
   userSceneButton: true,
   profileId: "",
+  llmMode: "tavern",
+  directProfileId: "",
   novelAiWriterProfileId: "",
   novelAiWriterEnabled: false,
   prompt: STARTER_PROMPT,
@@ -43,12 +64,13 @@ var DEFAULTS = Object.freeze({
 var numberIn = (value, fallback, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback;
 function normalizeFields(raw = {}) {
   const result = { ...DEFAULTS };
-  for (const key of ["profileId", "novelAiWriterProfileId", "prompt", "template", "extraContext", "sillyImagesFolder", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "presetName"]) {
+  for (const key of ["profileId", "llmMode", "directProfileId", "novelAiWriterProfileId", "prompt", "template", "extraContext", "sillyImagesFolder", "imageBackend", "novelAiWorkerUrl", "novelAiStyleMode", "importedName", "presetName"]) {
     if (typeof raw[key] === "string") result[key] = raw[key];
   }
   for (const key of ["auto", "pauseOffscreen", "novelAiWriterEnabled", "userSceneButton"]) {
     if (typeof raw[key] === "boolean") result[key] = raw[key];
   }
+  result.llmMode = result.llmMode === "direct" ? "direct" : "tavern";
   result.contextCount = Math.round(numberIn(raw.contextCount, 1, 1, 20));
   result.maxTokens = Math.round(numberIn(raw.maxTokens, 6e3, 512, 32e3));
   result.temperature = numberIn(raw.temperature, 0.8, 0, 2);
@@ -700,7 +722,7 @@ var TavernAdapters = class {
   }
   async prepare(settings, token, signal) {
     const effectiveProfileId = settings.imageBackend === "novelai_worker" && settings.novelAiWriterEnabled && settings.novelAiWriterProfileId ? settings.novelAiWriterProfileId : settings.profileId;
-    const profile = this.getContext().extensionSettings.connectionManager?.profiles?.find((p) => p.id === effectiveProfileId);
+    const profile = settings.llmMode === "direct" ? {api:"custom-direct",model:directProfile(settings)?.model || ""} : this.getContext().extensionSettings.connectionManager?.profiles?.find((p) => p.id === effectiveProfileId);
     const entry = {
       at: (/* @__PURE__ */ new Date()).toISOString(),
       api: profile?.api || "",
@@ -755,7 +777,7 @@ var TavernAdapters = class {
     if (!isLive(token, context, token.epoch)) throw new DOMException("Stopped", "AbortError");
     const request = context.ConnectionManagerRequestService;
     const effectiveProfileId = settings.imageBackend === "novelai_worker" && settings.novelAiWriterEnabled && settings.novelAiWriterProfileId ? settings.novelAiWriterProfileId : settings.profileId;
-    const profile = (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === effectiveProfileId);
+    const profile = settings.llmMode === "direct" ? {api:"custom-direct",model:directProfile(settings)?.model || ""} : (context.extensionSettings.connectionManager?.profiles || []).find((item) => item.id === effectiveProfileId);
     if (!profile) throw new SceneError("profile", "Выбери основную LLM для подготовки сцены.");
     if (!settings.prompt.trim()) throw new SceneError("prompt", "Добавь промпт сцены в настройках.");
     const substitute = (text) => context.substituteParams(String(text || ""));
@@ -777,7 +799,9 @@ Character: {{char}}. User persona: {{user}}.`) },
       { role: "user", content: settings.outputMode === "template" ? "Generate the requested block for the current scene, following its creative instructions and template." : "Illustrate only the current scene above. Return the complete comic, HTML/CSS artifact and separate illustration now." }
     ];
     let result;
-    if (profile.mode === "tc") {
+    if (settings.llmMode === "direct") {
+      result = await bounded((deadlineSignal) => requestDirect(settings, messages, deadlineSignal, entry), signal, 18e4);
+    } else if (profile.mode === "tc") {
       if (typeof request?.sendRequest !== "function") throw new SceneError("compatibility", "Недоступен сервис текстового подключения Таверны.");
       entry.transport = "native_text_completion";
       entry.stage = "text_request";
@@ -1018,7 +1042,17 @@ var SceneUI = class {
             <details class="sbl-panel" id="sbl-panel-start" open><summary>▶️ Запуск сцены <span class="sbl-summary-note">главное</span></summary><div class="sbl-panel-body">
               <div class="sbl-subhead"><strong>Рабочий стол</strong><small>Три вещи: какой промпт, какая LLM и когда запускать.</small></div>
               <label class="sbl-main-choice">📚 Промпт<select id="sbl-presetChoice"></select></label>
-              <div class="sbl-global-model"><div><strong>🧠 Основная LLM</strong><small>Одна для обычных блоков. Промпты её не переключают.</small></div><select id="sbl-profile"></select></div>
+              <label>🧠 Способ подключения<select id="sbl-llmMode"><option value="tavern">Профиль SillyTavern (старый способ)</option><option value="direct">Свой URL + API-ключ (OpenAI-compatible)</option></select></label>
+              <div id="sbl-tavern-model"><div class="sbl-global-model"><div><strong>Основная LLM</strong><small>Профиль из Connection Manager</small></div><select id="sbl-profile"></select></div></div>
+              <div id="sbl-direct-box" hidden class="sbl-direct-box">
+                <label>💾 Мои подключения<select id="sbl-directProfileId"></select></label>
+                <label>Название<input id="sbl-direct-name" type="text" placeholder="Мой Gemini / OpenRouter"></label>
+                <label>URL API<input id="sbl-direct-url" type="url" autocomplete="off" placeholder="https://example.com/v1"></label>
+                <label>Название модели<input id="sbl-direct-model" type="text" autocomplete="off" placeholder="model-id"></label>
+                <label>API-ключ<div class="sbl-keyrow"><input id="sbl-direct-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..."><button type="button" id="sbl-direct-eye" aria-label="Показать или скрыть ключ">👁️</button></div></label>
+                <div class="sbl-row"><button type="button" id="sbl-direct-save">💾 Сохранить подключение</button><button type="button" id="sbl-direct-new">＋ Новое</button><button type="button" id="sbl-direct-delete">Удалить</button></div>
+                <small>Ключ хранится локально в браузере этого устройства (без шифрования), не попадает в экспорт промптов. Используй только доверенный HTTPS API с поддержкой CORS. Не вставляй ключи в чат.</small>
+              </div>
               <div class="sbl-route-strip"><span>🎨 Картинки</span><strong id="sbl-routeSummary">Silly Images Plus</strong><small>Маршрут меняется во вкладке «Медиа»</small></div>
               <label class="sbl-check sbl-switch"><input id="sbl-userSceneButton" type="checkbox"> <span><strong>Кнопка «Сцена» на моих сообщениях</strong><small>Ручная генерация по своему сообщению, отдельно от ответов персонажа.</small></span></label>
               <label class="sbl-check sbl-switch"><input id="sbl-auto" type="checkbox"> <span><strong>Автоматически после ответа</strong><small>Отдельно для текущего swipe.</small></span></label>
@@ -1142,7 +1176,48 @@ var SceneUI = class {
     });
     on2("sbl-auto", "change", () => this.readInputs());
     on2("sbl-userSceneButton", "change", () => { this.readInputs(); this.renderAll(); });
+    const directUI = () => {
+      const settings = this.settings();
+      const isDirect = settings.llmMode === "direct";
+      section.querySelector("#sbl-direct-box").hidden = !isDirect;
+      section.querySelector("#sbl-tavern-model").hidden = isDirect;
+    };
+    const fillDirect = () => {
+      const select = section.querySelector("#sbl-directProfileId");
+      const profiles = directProfiles();
+      select.replaceChildren(new Option("— Выбери или создай —", ""), ...profiles.map(p => new Option(p.name || p.model, p.id)));
+      select.value = this.settings().directProfileId;
+      const profile = profiles.find(p => p.id === select.value);
+      section.querySelector("#sbl-direct-name").value = profile?.name || "";
+      section.querySelector("#sbl-direct-url").value = profile?.url || "";
+      section.querySelector("#sbl-direct-model").value = profile?.model || "";
+      section.querySelector("#sbl-direct-key").value = profile?.key || "";
+    };
+    on2("sbl-llmMode", "change", () => { this.readInputs(); directUI(); });
+    on2("sbl-directProfileId", "change", () => { this.readInputs(); fillDirect(); });
+    on2("sbl-direct-eye", "click", () => { const input = section.querySelector("#sbl-direct-key"); input.type = input.type === "password" ? "text" : "password"; });
+    on2("sbl-direct-new", "click", () => { const settings = this.settings(); settings.directProfileId = ""; this.store(settings); fillDirect(); });
+    on2("sbl-direct-save", "click", () => {
+      const name = section.querySelector("#sbl-direct-name").value.trim();
+      const url = section.querySelector("#sbl-direct-url").value.trim();
+      const model = section.querySelector("#sbl-direct-model").value.trim();
+      const key = section.querySelector("#sbl-direct-key").value.trim();
+      if (!name || !url || !model || !key) { this.notice("Заполни название, URL, модель и ключ.", true); return; }
+      if (!/^https:\/\//i.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(url)) { this.notice("Используй HTTPS URL.", true); return; }
+      const settings = this.settings(); const profiles = directProfiles();
+      const id = settings.directProfileId || ("direct_" + Date.now().toString(36));
+      const profile = {id,name,url,model,key}; const index = profiles.findIndex(p => p.id === id);
+      if (index >= 0) profiles[index] = profile; else profiles.push(profile);
+      try { localStorage.setItem(DIRECT_STORE_KEY, JSON.stringify(profiles)); } catch { this.notice("Не удалось сохранить ключ в браузере.", true); return; }
+      settings.directProfileId = id; settings.llmMode = "direct"; this.store(settings); fillDirect(); directUI(); this.notice("Подключение сохранено локально. Можно запускать сцену.");
+    });
+    on2("sbl-direct-delete", "click", () => {
+      const settings = this.settings(); if (!settings.directProfileId) return;
+      localStorage.setItem(DIRECT_STORE_KEY, JSON.stringify(directProfiles().filter(p => p.id !== settings.directProfileId)));
+      settings.directProfileId = ""; this.store(settings); fillDirect(); this.notice("Подключение удалено с этого устройства.");
+    });
     on2("sbl-profile", "change", () => this.readInputs());
+    directUI(); fillDirect();
     on2("sbl-imageBackend", "change", () => {
       this.readInputs();
       this.updateProviderUI();
@@ -1334,6 +1409,8 @@ var SceneUI = class {
     this.fillProfiles();
     this.fillExtBlocks();
     this.fillSavedPresets();
+    const directBox = document.getElementById("sbl-direct-box");
+    if (directBox) { directBox.hidden = settings.llmMode !== "direct"; document.getElementById("sbl-tavern-model").hidden = settings.llmMode === "direct"; }
     this.updateProviderUI();
     const backendName = settings.imageBackend === "novelai_worker" ? "NovelAI Worker" : "SillyImages";
     document.getElementById("sbl-current-prompt").textContent = `Промпт: ${settings.presetName} · LLM выбирается отдельно · ${backendName}.`;

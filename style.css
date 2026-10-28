@@ -117,3 +117,5 @@
 #sbl-settings .sbl-prompt-extra label{display:grid;gap:5px;margin-top:9px}
 #sbl-settings #sbl-prompt{min-height:150px}
 @media(max-width:420px){#sbl-settings .sbl-prompt-meta{grid-template-columns:1fr}#sbl-settings .sbl-route-strip{grid-template-columns:auto minmax(0,1fr)}}
+
+#sbl-settings .sbl-direct-box{display:grid;gap:10px;padding:12px;border:1px solid #7c5cc288;border-radius:12px;background:#1d18302b}#sbl-settings .sbl-direct-box[hidden]{display:none!important}#sbl-settings #sbl-tavern-model[hidden]{display:none!important}#sbl-settings .sbl-direct-box label{display:grid;gap:5px;min-width:0}#sbl-settings .sbl-direct-box input,#sbl-settings .sbl-direct-box select{width:100%;min-width:0;box-sizing:border-box}#sbl-settings .sbl-keyrow{display:flex;gap:6px}#sbl-settings .sbl-keyrow input{flex:1;min-width:0}#sbl-settings .sbl-keyrow button{flex:0 0 auto}#sbl-settings .sbl-direct-box small{opacity:.8;line-height:1.45}
